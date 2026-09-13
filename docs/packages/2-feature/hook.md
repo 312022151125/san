@@ -61,7 +61,7 @@ var _ Handler = (*Engine)(nil)
 // Configuration methods on *Engine (used by the app composition root).
 func (e *Engine) SetSettings(*setting.Settings)
 func (e *Engine) SetLLMCompleter(LLMCompleter, string)
-func (e *Engine) SetTranscriptPath(string)
+func (e *Engine) SetSession(sessionID, transcriptPath string)
 func (e *Engine) SetCwd(string)
 func (e *Engine) SetPermissionMode(string)
 func (e *Engine) SetAsyncHookCallback(AsyncHookCallback)
@@ -91,7 +91,7 @@ methods don't earn an interface; TEMPLATE Rule 3.
 - `Engine` (`engine.go`) is the only implementation. It owns:
   - `*hookStore` — settings-loaded hooks plus session/runtime function hooks
   - `*statusTracker` — currently-active hook status message for the TUI
-  - mutable knobs (`settings`, `cwd`, `transcriptPath`, `permissionMode`,
+  - mutable knobs (`settings`, `cwd`, `sessionID`, `transcriptPath`, `permissionMode`,
     `llmCompleter`, `httpClient`, `promptCallback`, `asyncCallback`,
     `auditCallback`, `envProvider`) under one `sync.RWMutex`
   - a `sync.WaitGroup` for fire-and-forget detached goroutines

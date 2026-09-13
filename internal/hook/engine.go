@@ -103,11 +103,14 @@ func (e *Engine) SetPromptCallback(cb PromptCallback) {
 	e.promptCallback = cb
 }
 
-// SetTranscriptPath updates the transcript path after engine creation.
-func (e *Engine) SetTranscriptPath(path string) {
+// SetSession re-points hook input (session_id, transcript_path, and the
+// SESSION_ID env) at the session the app now runs — a resume, fork, or
+// /resume replaces the one the engine was built with.
+func (e *Engine) SetSession(sessionID, transcriptPath string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.transcriptPath = path
+	e.sessionID = sessionID
+	e.transcriptPath = transcriptPath
 }
 
 // SetCwd updates the working directory used for hook input and subprocess execution.

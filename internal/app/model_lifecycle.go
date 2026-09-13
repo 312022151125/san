@@ -44,12 +44,15 @@ func newModel(opts setting.RunOptions) (*model, error) {
 	m.applyPersonaSkills()
 	m.applyPersonaAgents()
 	m.wireReminderProviders()
-	m.InitTaskStorage()
 	m.userInput.Autopilot.SetMissionRefiner(m.missionRefine)
 	m.userInput.Autopilot.SetConfigSource(func() setting.AutoPilotSettings { return m.env.AutoPilot })
 	if err := m.applyRunOptions(opts); err != nil {
 		return nil, err
 	}
+	// After the run options: a -c / -r start has adopted its session's task
+	// directory by now, and this is a no-op for it. Before, every resume left
+	// an empty tasks/<startup-id>/ behind and kept writing there.
+	m.InitTaskStorage()
 	return m, nil
 }
 

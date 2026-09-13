@@ -587,6 +587,21 @@ cat > `+captureFile+`
 	if !ok || cwd != tmpDir {
 		t.Errorf("expected cwd=%q in hook input, got %v", tmpDir, parsed["cwd"])
 	}
+
+	// A resumed or forked session re-points both identity fields.
+	engine.SetSession("resumed-session", "/tmp/resumed.jsonl")
+	engine.Execute(context.Background(), PreToolUse, HookInput{ToolName: "Bash"})
+	data, err = os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("capture file not rewritten: %v", err)
+	}
+	parsed = nil
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("captured input is not valid JSON: %v\nContent: %s", err, data)
+	}
+	if parsed["session_id"] != "resumed-session" || parsed["transcript_path"] != "/tmp/resumed.jsonl" {
+		t.Errorf("after SetSession: session_id=%v transcript_path=%v", parsed["session_id"], parsed["transcript_path"])
+	}
 }
 
 func TestHooks_PermissionModeIncludedOnlyForRelevantEvents(t *testing.T) {

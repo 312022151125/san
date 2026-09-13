@@ -35,13 +35,19 @@ func (m *model) PersistSession() error {
 		return err
 	}
 
-	m.services.Session.SetID(sess.Metadata.ID)
+	m.adoptSession(sess.Metadata.ID)
 	m.initTaskStorage(m.services.Session.ID())
-
-	m.services.Hook.SetTranscriptPath(m.services.Session.GetStore().SessionPath(sess.Metadata.ID))
 	m.ReconfigureAgentTool()
 
 	return nil
+}
+
+// adoptSession makes id the current session everywhere that carries it: the
+// session service and the hook engine, whose session_id and transcript_path
+// would otherwise stay on the id minted at startup after a resume or fork.
+func (m *model) adoptSession(id string) {
+	m.services.Session.SetID(id)
+	m.services.Hook.SetSession(id, m.services.Session.TranscriptPath())
 }
 
 type persistSessionDoneMsg struct{ err error }
@@ -141,7 +147,6 @@ func (m *model) loadSessionByID(id string) error {
 	// read-before-modify gate in this one.
 	m.ResetAgentSession()
 	fs.ResetFileViews()
-	m.setTrackerStorageDir("")
 	m.restoreSessionData(sess)
 
 	if len(sess.Tasks) == 0 {
@@ -155,9 +160,13 @@ func (m *model) loadSessionByID(id string) error {
 
 func (m *model) restoreSessionData(sess *session.Snapshot) {
 	m.conv.Messages = sess.Messages
-	m.services.Session.SetID(sess.Metadata.ID)
+	m.adoptSession(sess.Metadata.ID)
 	m.env.SessionName = sess.Metadata.Title
 
+	// Leave any earlier session's tracker directory behind: initTaskStorage
+	// keeps a directory that is already set, and this session's items are
+	// re-imported below after SetStorageDir's disk load.
+	m.setTrackerStorageDir("")
 	m.initTaskStorage(m.services.Session.ID())
 
 	if len(sess.Tasks) > 0 {
@@ -241,7 +250,7 @@ func (m *model) forkSession() (string, error) {
 		return "", err
 	}
 	originalID := forked.Metadata.ParentSessionID
-	m.services.Session.SetID(forked.Metadata.ID)
+	m.adoptSession(forked.Metadata.ID)
 	// The live agent holds an onEvent closure over a Recorder bound to the
 	// parent's id, and a Recorder's session is fixed at construction. Without
 	// this stop it keeps writing the fork's messages, inferences, permissions
