@@ -33,6 +33,13 @@ jobs:
       - name: Build binaries
         run: make release
 
+      # sign also checks the signature against the key built into san, so a
+      # secret that does not match the code fails here instead of shipping.
+      - name: Sign checksums
+        env:
+          SAN_RELEASE_SIGNING_KEY: ${{ secrets.SAN_RELEASE_SIGNING_KEY }}
+        run: go run ./tools/releasekey sign bin/SHA256SUMS
+
       - name: Extract release notes
         env:
           TAG_NAME: ${{ github.ref_name }}
@@ -57,5 +64,7 @@ jobs:
           files: |
             bin/san_*.tar.gz
             bin/san_*.zip
+            bin/SHA256SUMS
+            bin/SHA256SUMS.sig
             CHANGELOG.md
           body_path: release-notes.md
