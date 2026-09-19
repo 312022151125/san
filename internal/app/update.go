@@ -113,6 +113,12 @@ func (m *model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case initialPromptMsg:
 		m.userInput.Textarea.SetValue(string(msg))
 		return m, m.handleSubmit()
+	case updateInstalledMsg:
+		m.updateInstalled = string(msg)
+		return m, nil
+	case updateFailedMsg:
+		m.updateFailed = msg
+		return m, nil
 	case tea.KeyPressMsg:
 		if c, ok := m.routeKeypress(msg); ok {
 			return m, c
