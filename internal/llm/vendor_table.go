@@ -432,9 +432,14 @@ func ZenToolPadder(tools []ai.Tool) []ai.Tool {
 	padded := make([]ai.Tool, len(tools), len(tools)+len(missing))
 	copy(padded, tools)
 	for _, name := range missing {
-		// Stub: name only, empty description, minimal schema. The gate checks
-		// names and ignores schemas, so this is all that is needed on the wire.
-		padded = append(padded, ai.Tool{Schema: ai.Schema{Name: name}})
+		// Stub: name only, empty description, minimal valid parameters object.
+		// The gate checks names and ignores schemas, but the Responses API
+		// driver rejects a nil Parameters field — set the minimal {"type":"object"}
+		// so the wire shape is accepted.
+		padded = append(padded, ai.Tool{Schema: ai.Schema{
+			Name:       name,
+			Definition: map[string]any{"type": "object"},
+		}})
 	}
 	return padded
 }
