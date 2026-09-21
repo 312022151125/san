@@ -311,13 +311,6 @@ func zenVendor() catalog.Vendor {
 	}
 }
 
-// zenModels serves the hard-coded model without hitting the network. Zen does
-// publish /v1/models, but its families span four wire shapes and this row
-// speaks one, so a live listing would surface models this driver cannot run.
-func zenModels(context.Context, *sdkprovider.Provider) ([]ai.Model, error) {
-	return []ai.Model{{ID: zenModel, Name: zenModel}}, nil
-}
-
 // configureZen points the endpoint at Zen, stamped as OpenCode's own CLI.
 // The credential stays the driver's business: it sends cfg.APIKey as
 // Authorization: Bearer, so nothing here sets that header by hand.

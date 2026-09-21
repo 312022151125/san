@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
@@ -118,6 +119,112 @@ func codexModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, erro
 // credential must surface: connecting verifies the account by listing models,
 // so a signed-out one recorded as connected would fail on the first real turn.
 func codexErrorKind(status int) ai.ErrorKind {
+	switch {
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		return ai.KindAuth
+	case status == http.StatusTooManyRequests:
+		return ai.KindRateLimit
+	case status >= 500:
+		return ai.KindOverloaded
+	default:
+		return ai.KindInvalidRequest
+	}
+}
+
+const zenListTimeout = 8 * time.Second
+
+// zenModels fetches the live model listing from OpenCode Zen and filters
+// for models supported by the OpenAI chat completions driver.
+func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error) {
+	cfg := p.ConfigFor(ai.Model{ID: zenModel, API: ai.APIOpenAIChat})
+	client := cfg.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, zenListTimeout)
+	defer cancel()
+
+	url := strings.TrimRight(cfg.URL(), "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	for name, value := range cfg.MergedHeaders() {
+		req.Header.Set(name, value)
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode >= 400 {
+		return nil, &ai.Error{
+			Driver:  "openai-chat",
+			Kind:    zenErrorKind(res.StatusCode),
+			Status:  res.StatusCode,
+			Message: "the OpenCode Zen catalog declined: " + string(body),
+		}
+	}
+
+	var listing struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &listing); err != nil {
+		return nil, err
+	}
+
+	models := make([]ai.Model, 0, len(listing.Data))
+	for _, m := range listing.Data {
+		if m.ID == "" || !isZenChatCompletionModel(m.ID) {
+			continue
+		}
+		models = append(models, ai.Model{
+			ID:   m.ID,
+			Name: m.ID,
+			API:  ai.APIOpenAIChat,
+		})
+	}
+	if len(models) == 0 {
+		return []ai.Model{{ID: zenModel, Name: zenModel, API: ai.APIOpenAIChat}}, nil
+	}
+	return models, nil
+}
+
+// isZenChatCompletionModel reports whether a model from OpenCode Zen uses the
+// OpenAI-compatible /chat/completions endpoint. Other families (Claude, GPT,
+// Grok, Muse, Gemini, Qwen, Jev) use different protocols (/messages, /responses,
+// /models, /systemone) that this driver cannot run.
+func isZenChatCompletionModel(id string) bool {
+	lower := strings.ToLower(id)
+	switch {
+	case strings.HasPrefix(lower, "deepseek-"),
+		strings.HasPrefix(lower, "glm-"),
+		strings.HasPrefix(lower, "minimax-"),
+		strings.HasPrefix(lower, "kimi-"),
+		strings.HasPrefix(lower, "mimo-"),
+		strings.HasPrefix(lower, "ling-"),
+		strings.HasPrefix(lower, "nemotron-"),
+		lower == "big-pickle":
+		return true
+	default:
+		return false
+	}
+}
+
+func zenErrorKind(status int) ai.ErrorKind {
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
 		return ai.KindAuth
