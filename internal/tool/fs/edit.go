@@ -2,12 +2,13 @@ package fs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/genai-io/san/internal/core"
 	"github.com/genai-io/san/internal/tool"
 	"github.com/genai-io/san/internal/tool/perm"
 	"github.com/genai-io/san/internal/tool/toolresult"
@@ -19,28 +20,30 @@ const IconEdit = "✏️"
 // rewrite doesn't bloat the session transcript; the UI shows the cap notice.
 const maxStoredDiffLines = 400
 
-// EditTool performs exact string replacement on a file. The parameter shape
-// (file_path, old_string, new_string, replace_all) is the one models know
-// from training, which matters more for call reliability than any schema
-// documentation.
+// EditTool edits a file using hashline anchors (LINE#hash) and a whole-file
+// tag (@file path#TAG). Both must match the on-disk content; stale anchors are
+// rejected without any silent partial application.
+//
+// Workflow:
+//  1. Read the file to obtain the @file path#TAG header and LINE#hash|content lines.
+//  2. Call Edit with file_tag from the header and one or more edits
+//     that reference the LINE#hash anchors.
+//  3. After a successful Edit the snapshot is invalidated — re-read before
+//     the next Edit on the same file.
 type EditTool struct{}
 
-type editReplacement struct {
-	oldString  string
-	newString  string
-	replaceAll bool
-}
-
 func (t *EditTool) Name() string        { return "Edit" }
-func (t *EditTool) Description() string { return "Edit file contents using exact string replacement" }
+func (t *EditTool) Description() string { return "Edit a file using hashline anchors" }
 func (t *EditTool) Icon() string        { return IconEdit }
 
 func (t *EditTool) RequiresPermission() bool { return true }
 
+// PreparePermission reads the file, applies the edits as a dry-run, and
+// generates a diff for the user approval dialog.
 func (t *EditTool) PreparePermission(ctx context.Context, params map[string]any, cwd string) (*perm.PermissionRequest, error) {
-	filePath, edit, err := parseEditRequest(params)
+	filePath, fileTag, edits, err := parseEditParams(params)
 	if err != nil {
-		return nil, err
+		return nil, &tool.ToolError{Message: err.Error()}
 	}
 	filePath = resolveEditPath(filePath, cwd)
 
@@ -54,23 +57,31 @@ func (t *EditTool) PreparePermission(ctx context.Context, params map[string]any,
 	if _, err := requireObservedView(filePath); err != nil {
 		return nil, &tool.ToolError{Message: err.Error()}
 	}
-	newContent, _, err := applyEdit(string(content), edit)
+
+	oldContent, bom, hasWindowsLE := prepareEditContent(string(content))
+	newContent, err := ApplyHashlineEdits(oldContent, fileTag, edits)
 	if err != nil {
-		return nil, &tool.ToolError{Message: err.Error()}
+		return nil, &tool.ToolError{Message: editErrMsg(err)}
 	}
+	if hasWindowsLE {
+		newContent = strings.ReplaceAll(newContent, "\n", "\r\n")
+	}
+	newContent = bom + newContent
 
 	return &perm.PermissionRequest{
 		ID:          tool.GenerateRequestID(),
 		ToolName:    t.Name(),
 		FilePath:    filePath,
-		Description: "Replace text in file",
+		Description: fmt.Sprintf("Edit file (%d operation(s))", len(edits)),
 		DiffMeta:    perm.GenerateDiff(filePath, string(content), newContent),
 	}, nil
 }
 
+// ExecuteApproved applies the hashline edits after user approval.
 func (t *EditTool) ExecuteApproved(ctx context.Context, params map[string]any, cwd string) toolresult.ToolResult {
 	start := time.Now()
-	filePath, edit, err := parseEditRequest(params)
+
+	filePath, fileTag, edits, err := parseEditParams(params)
 	if err != nil {
 		return toolresult.NewErrorResult(t.Name(), err.Error())
 	}
@@ -85,18 +96,21 @@ func (t *EditTool) ExecuteApproved(ctx context.Context, params map[string]any, c
 		return toolresult.NewErrorResult(t.Name(), err.Error())
 	}
 
-	oldContent := string(content)
-	newContent, replaceCount, err := applyEdit(oldContent, edit)
-	if err != nil {
-		// A stale view turns a match failure ambiguous: old_string may be
-		// wrong, or the target may have been changed under the model. Name
-		// the staleness so the recovery (re-read) is obvious.
+	oldContent, bom, hasWindowsLE := prepareEditContent(string(content))
+
+	newContent, applyErr := ApplyHashlineEdits(oldContent, fileTag, edits)
+	if applyErr != nil {
+		msg := editErrMsg(applyErr)
 		if view == viewStale {
-			return toolresult.NewErrorResult(t.Name(),
-				fmt.Sprintf("%s changed on disk after it was last read, and against its current content: %s. Read the file again", filePath, err.Error()))
+			msg = filePath + " changed on disk since last read; " + msg
 		}
-		return toolresult.NewErrorResult(t.Name(), err.Error())
+		return toolresult.NewErrorResult(t.Name(), msg)
 	}
+
+	if hasWindowsLE {
+		newContent = strings.ReplaceAll(newContent, "\n", "\r\n")
+	}
+	newContent = bom + newContent
 
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(filePath); err == nil {
@@ -109,125 +123,131 @@ func (t *EditTool) ExecuteApproved(ctx context.Context, params map[string]any, c
 
 	changes := perm.GenerateDiff(filePath, oldContent, newContent)
 	storedDiff, truncatedDiffLines := perm.CapUnifiedDiff(changes.UnifiedDiff, maxStoredDiffLines)
-	output := fmt.Sprintf("Edited %s (%d replacement(s), +%d -%d)", filePath, replaceCount, changes.AddedCount, changes.RemovedCount)
-	// On the fresh path the hint suppresses the verify-read reflex; on the
-	// stale path the edit landed cleanly but the file holds other changes
-	// the model has not seen.
-	if view == viewStale {
-		output += ". Note: the file had changed on disk since your last read — this edit applied cleanly, but the file contains other changes not in your context; Read it before edits that depend on surrounding content"
-	} else {
-		output += "; file state is current — no need to re-read"
-	}
+
+	output := fmt.Sprintf(
+		"Edited %s (%d edit(s), +%d -%d); snapshot invalidated — re-read before next Edit",
+		filePath, len(edits), changes.AddedCount, changes.RemovedCount,
+	)
+
 	return toolresult.ToolResult{
 		Success: true,
 		Output:  output,
 		Details: toolresult.FileChangeDetails{
 			Path:               filePath,
-			EditCount:          replaceCount,
+			EditCount:          len(edits),
 			AddedLines:         changes.AddedCount,
 			RemovedLines:       changes.RemovedCount,
 			UnifiedDiff:        storedDiff,
 			TruncatedDiffLines: truncatedDiffLines,
 		},
 		HookResponse: map[string]any{
-			"filePath":        filePath,
-			"oldString":       edit.oldString,
-			"newString":       edit.newString,
-			"replaceAll":      edit.replaceAll,
-			"originalFile":    oldContent,
-			"structuredPatch": []any{},
-			"userModified":    false,
+			"filePath":     filePath,
+			"fileTag":      fileTag,
+			"editCount":    len(edits),
+			"originalFile": oldContent,
 		},
-		Metadata: toolresult.ResultMetadata{Title: t.Name(), Icon: t.Icon(), Subtitle: filePath, Duration: time.Since(start)},
+		Metadata: toolresult.ResultMetadata{
+			Title:    t.Name(),
+			Icon:     t.Icon(),
+			Subtitle: filePath,
+			Duration: time.Since(start),
+		},
 	}
 }
 
-func parseEditRequest(params map[string]any) (string, editReplacement, error) {
-	filePath, err := tool.RequireString(params, "file_path")
+// Execute is required by the Tool interface; Edit is gated so in practice
+// ExecuteApproved is called. This fallback runs it ungated (e.g. in tests).
+func (t *EditTool) Execute(ctx context.Context, params map[string]any, cwd string) toolresult.ToolResult {
+	return t.ExecuteApproved(ctx, params, cwd)
+}
+
+// Schema returns the model-facing tool definition for Edit.
+func (t *EditTool) Schema() core.ToolSchema {
+	return editSchema()
+}
+
+// --- helpers ----------------------------------------------------------------
+
+// parseEditParams extracts and validates Edit call parameters.
+func parseEditParams(params map[string]any) (filePath, fileTag string, edits []HashlineEdit, err error) {
+	filePath, err = tool.RequireString(params, "file_path")
 	if err != nil {
-		return "", editReplacement{}, err
+		return
 	}
-	oldString, ok := params["old_string"].(string)
-	if !ok || oldString == "" {
-		return "", editReplacement{}, &tool.ToolError{Message: "old_string must be a non-empty string"}
+	fileTag, err = tool.RequireString(params, "file_tag")
+	if err != nil {
+		return
 	}
-	newString, ok := params["new_string"].(string)
+
+	// edits may arrive as []any (from JSON decode) or []HashlineEdit.
+	rawEdits, ok := params["edits"]
 	if !ok {
-		return "", editReplacement{}, &tool.ToolError{Message: "new_string is required (use an empty string to delete old_string)"}
+		err = fmt.Errorf("edits is required")
+		return
 	}
-	oldString = normalizeLineEndings(oldString)
-	newString = normalizeLineEndings(newString)
-	if newString == oldString {
-		return "", editReplacement{}, &tool.ToolError{Message: "new_string must be different from old_string"}
+
+	// Re-encode/decode via JSON to handle []any → []HashlineEdit safely.
+	b, jsonErr := json.Marshal(rawEdits)
+	if jsonErr != nil {
+		err = fmt.Errorf("edits: %w", jsonErr)
+		return
 	}
-	return filePath, editReplacement{
-		oldString:  oldString,
-		newString:  newString,
-		replaceAll: tool.GetBool(params, "replace_all"),
-	}, nil
+	if jsonErr := json.Unmarshal(b, &edits); jsonErr != nil {
+		err = fmt.Errorf("edits: %w", jsonErr)
+		return
+	}
+	if len(edits) == 0 {
+		err = fmt.Errorf("edits must be a non-empty array")
+		return
+	}
+	return
 }
 
-// applyEdit performs the replacement on content, preserving a BOM and
-// Windows line endings. It returns the new content and how many occurrences
-// were replaced.
-func applyEdit(content string, edit editReplacement) (string, int, error) {
-	bom := ""
+// prepareEditContent strips BOM and normalises line endings for hashing
+// and editing. Returns the clean LF-only content, any BOM that was stripped
+// (to re-prepend after writing), and whether the original had Windows line
+// endings (so the caller can restore them after edit).
+func prepareEditContent(content string) (lf, bom string, hadWindowsLE bool) {
 	if after, ok := strings.CutPrefix(content, "\ufeff"); ok {
-		bom, content = "\ufeff", after
+		bom, lf = "\ufeff", after
+	} else {
+		lf = content
 	}
-	windowsLineEndings := strings.Contains(content, "\r\n")
-	if windowsLineEndings && strings.Contains(strings.ReplaceAll(content, "\r\n", ""), "\n") {
-		return "", 0, fmt.Errorf("file has mixed line endings; normalize it before editing")
+	hadWindowsLE = strings.Contains(lf, "\r\n")
+	if hadWindowsLE {
+		lf = strings.ReplaceAll(lf, "\r\n", "\n")
 	}
-	content = normalizeLineEndings(content)
-
-	content, replaceCount, err := replaceInContent(content, edit)
-	if err != nil {
-		return "", 0, err
-	}
-
-	if windowsLineEndings {
-		content = strings.ReplaceAll(content, "\n", "\r\n")
-	}
-	return bom + content, replaceCount, nil
+	return lf, bom, hadWindowsLE
 }
 
-func replaceInContent(content string, edit editReplacement) (string, int, error) {
-	occurrences := strings.Count(content, edit.oldString)
-	if edit.replaceAll && occurrences > 0 {
-		return strings.ReplaceAll(content, edit.oldString, edit.newString), occurrences, nil
-	}
-
-	switch occurrences {
-	case 1:
-		return strings.Replace(content, edit.oldString, edit.newString, 1), 1, nil
-	case 0:
-		// Zero exact matches usually means a whitespace transcription slip;
-		// the tolerant ladder recovers or diagnoses it. This also serves
-		// replace_all — a unique tolerant match is the only occurrence.
-		match, err := resolveTolerantMatch(content, edit.oldString)
-		if err != nil {
-			return "", 0, err
+// editErrMsg converts apply errors to short, model-actionable messages.
+func editErrMsg(err error) string {
+	switch e := err.(type) {
+	case *ErrFileTagMismatch:
+		return fmt.Sprintf(
+			"file tag stale (want %s, current file is %s) — re-read before editing",
+			e.Expected, e.Actual,
+		)
+	case *HashlineMismatchError:
+		var b strings.Builder
+		b.WriteString("line hash stale — re-read before editing:")
+		for _, m := range e.Mismatches {
+			fmt.Fprintf(&b, " line %d (want %s got %s);", m.Line, m.Expected, m.Actual)
 		}
-		return content[:match.start] + edit.newString + content[match.end:], 1, nil
+		return strings.TrimSuffix(b.String(), ";")
 	default:
-		return "", 0, fmt.Errorf("old_string matches %d locations; add surrounding context to make it unique, or set replace_all to change every occurrence", occurrences)
+		return err.Error()
 	}
-}
-
-func normalizeLineEndings(content string) string {
-	return strings.ReplaceAll(content, "\r\n", "\n")
 }
 
 func resolveEditPath(filePath, cwd string) string {
-	if filepath.IsAbs(filePath) {
+	if filePath == "" || filePath[0] == '/' {
 		return filePath
 	}
-	return filepath.Join(cwd, filePath)
-}
-
-func (t *EditTool) Execute(ctx context.Context, params map[string]any, cwd string) toolresult.ToolResult {
-	return t.ExecuteApproved(ctx, params, cwd)
+	if cwd == "" {
+		return filePath
+	}
+	return cwd + "/" + filePath
 }
 
 func init() {

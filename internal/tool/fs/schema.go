@@ -14,11 +14,14 @@ func (t *ReadTool) Schema() core.ToolSchema {
 		Name: "Read",
 		Description: fmt.Sprintf(`Reads a file from the local filesystem.
 
+Output format: first line is "@file rel/path#TAG" (whole-file 4-hex fingerprint), then
+lines in "LINE#hash|content" format. Supply file_tag and LINE#hash anchors to Edit.
+
 - Prefer relative paths for files inside the session working directory; absolute for targets outside it
-- Reads up to %d lines from the start by default; when you already know which part of a large file you need, read just that part with offset/limit
-- Read output has a line-number and tab prefix; strip it for Edit and preserve the rest exactly
-- Lines over %d characters end with “%s” and cannot be copied into an Edit
-- Do not re-read a file to verify your own Edit/Write — a failed change errors, and successful results keep your view current
+- Reads up to %d lines by default; use offset/limit for large files
+- Lines over %d characters end with "%s" and cannot be used as Edit anchors
+- The file tag covers the entire file even when offset/limit are used, so anchors are always valid
+- Do not re-read a file solely to verify your own Edit/Write — a failed change errors; successful results keep your view current
 - Image files are recognized but cannot be displayed yet; ask the user to attach the image to a message instead`, maxReadLines, maxLineLength, lineTruncationMarker),
 		Definition: map[string]any{
 			"type": "object",
@@ -41,37 +44,62 @@ func (t *ReadTool) Schema() core.ToolSchema {
 	}
 }
 
-// Schema returns the model-facing tool definition for Edit.
-func (t *EditTool) Schema() core.ToolSchema {
+// editSchema returns the model-facing tool definition for Edit.
+func editSchema() core.ToolSchema {
 	return core.ToolSchema{
 		Name: "Edit",
-		Description: `Performs exact string replacement in a file.
+		Description: `Edits a file using hashline anchors from Read output.
 
-- Requires a current view: Read first, unless successful Write/Edit already observed the file this session. Re-read after external changes.
-- old_string must match the file exactly after stripping Read's line-number prefix (preserve indentation) and must be unique — add surrounding context if not, or set replace_all to change every occurrence. Trailing-whitespace-only mismatches apply automatically; other whitespace slips fail with the actual lines echoed.
-- Apply several changes to one file with multiple Edit calls in one message; they run in order.
-- Do not Read and Edit the same file in one message.`,
+Workflow:
+1. Read the file to get the "@file path#TAG" header and "LINE#hash|content" lines.
+2. Call Edit with file_tag (the TAG from the header) and an edits array using LINE#hash anchors.
+3. After a successful Edit the snapshot is invalidated — re-read before the next Edit on the same file.
+
+Edit operations (each element of edits):
+- Replace single line:  {"from":"10#abc","to":"10#abc","content":"new line text"}
+- Replace range:        {"from":"10#abc","to":"12#ghi","content":"replacement\nlines"}
+- Delete line(s):       {"from":"10#abc","to":"10#abc"} (omit content field)
+- Insert before line N: {"from":"N#hash","to":"N#hash","content":"new line\nexisting line N content"}
+
+Safety rules:
+- If file_tag does not match the current file, the edit is rejected — re-read and retry.
+- If any LINE#hash anchor does not match the current line, the edit is rejected — re-read and retry.
+- Never guess or construct a file_tag — always copy it verbatim from Read output.`,
 		Definition: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"file_path": map[string]any{
 					"type":        "string",
-					"description": "Path to the file to modify. Relative paths are resolved from the current session working directory.",
+					"description": "Path to the file to edit. Relative paths are resolved from the current session working directory.",
 				},
-				"old_string": map[string]any{
+				"file_tag": map[string]any{
 					"type":        "string",
-					"description": "The exact text to replace",
+					"description": "Whole-file fingerprint from the @file path#TAG header returned by Read. Example: \"A1B2\". Stale tags are rejected.",
 				},
-				"new_string": map[string]any{
-					"type":        "string",
-					"description": "The replacement text (must differ from old_string)",
-				},
-				"replace_all": map[string]any{
-					"type":        "boolean",
-					"description": "Replace every occurrence of old_string (default false)",
+				"edits": map[string]any{
+					"type":        "array",
+					"description": "Ordered list of hashline edit operations.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"from": map[string]any{
+								"type":        "string",
+								"description": "Start anchor: LINE#hash (e.g. \"10#abc\"). Copy from Read output.",
+							},
+							"to": map[string]any{
+								"type":        "string",
+								"description": "End anchor: LINE#hash (e.g. \"12#ghi\"). Same as from for single-line edits.",
+							},
+							"content": map[string]any{
+								"type":        "string",
+								"description": "Replacement text for the from–to range (inclusive). Omit to delete the range.",
+							},
+						},
+						"required": []string{"from", "to"},
+					},
 				},
 			},
-			"required": []string{"file_path", "old_string", "new_string"},
+			"required": []string{"file_path", "file_tag", "edits"},
 		},
 	}
 }

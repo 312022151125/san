@@ -7,127 +7,64 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/genai-io/san/internal/tool/toolresult"
 )
 
-func editOnce(filePath, oldString, newString, cwd string) toolresult.ToolResult {
-	return (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
-		"file_path":  filePath,
-		"old_string": oldString,
-		"new_string": newString,
-	}, cwd)
-}
-
-func TestEditReplaceAll(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "rename.go")
-	content := "count := 1\nprint(count)\nreturn count\n"
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readForEdit(t, filePath, tmpDir)
-
-	// Without replace_all the ambiguity is an error that names the way out.
-	res := editOnce(filePath, "count", "total", tmpDir)
-	if res.Success || !strings.Contains(res.Error, "matches 3 locations") || !strings.Contains(res.Error, "replace_all") {
-		t.Fatalf("ambiguous edit should count matches and suggest replace_all, got: %+v", res)
-	}
-
+// editOnce is a convenience wrapper for a single-anchor hashline Edit in tests.
+// It reads the file first (to satisfy the view gate) and performs one replace.
+func editOnce(t *testing.T, filePath, cwd, lineContent, newContent string) bool {
+	t.Helper()
+	tag := readForEdit(t, filePath, cwd)
+	ref := buildRef(lineIndex(t, filePath, lineContent), lineContent)
 	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
-		"file_path":   filePath,
-		"old_string":  "count",
-		"new_string":  "total",
-		"replace_all": true,
-	}, tmpDir)
-	if !result.Success || !strings.Contains(result.Output, "3 replacement(s)") {
-		t.Fatalf("replace_all should report every occurrence, got: %+v", result)
-	}
-	got, _ := os.ReadFile(filePath)
-	if string(got) != "total := 1\nprint(total)\nreturn total\n" {
-		t.Fatalf("file content = %q", got)
-	}
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": ref, "to": ref, "content": newContent},
+		},
+	}, cwd)
+	return result.Success
 }
 
-func TestEditRejectsIdenticalStrings(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "noop.txt")
-	if err := os.WriteFile(filePath, []byte("hello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readForEdit(t, filePath, tmpDir)
-
-	res := editOnce(filePath, "hello", "hello", tmpDir)
-	if res.Success || !strings.Contains(res.Error, "must be different") {
-		t.Fatalf("a no-op edit must be rejected, got: %+v", res)
-	}
-}
-
-func TestEditTrailingWhitespaceFallback(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "code.go")
-	// File lines carry trailing spaces the model's old_string won't have.
-	content := "func main() {  \n\tprintln(\"hi\")\t\n}\n"
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readForEdit(t, filePath, tmpDir)
-
-	res := editOnce(filePath, "func main() {\n\tprintln(\"hi\")\n}\n", "func main() {\n\tprintln(\"bye\")\n}\n", tmpDir)
-	if !res.Success {
-		t.Fatalf("trailing-whitespace fallback should apply, got: %s", res.Error)
-	}
-	got, err := os.ReadFile(filePath)
+// lineIndex returns the 1-based line number of the first line in filePath
+// whose content equals lineContent (after LF normalization).
+func lineIndex(t *testing.T, filePath, lineContent string) int {
+	t.Helper()
+	raw, err := os.ReadFile(filePath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("lineIndex: %v", err)
 	}
-	if string(got) != "func main() {\n\tprintln(\"bye\")\n}\n" {
-		t.Fatalf("file content = %q", got)
+	content := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	for i, line := range strings.Split(content, "\n") {
+		if line == lineContent {
+			return i + 1
+		}
 	}
-}
-
-func TestEditIndentationMismatchEchoesFileLines(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "code.go")
-	content := "func main() {\n\tif ok {\n\t\tprintln(\"hi\")\n\t}\n}\n"
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readForEdit(t, filePath, tmpDir)
-
-	// Model transcribed the leading tabs as spaces — must NOT be applied
-	// (new_string carries the same broken indentation), but the error must
-	// locate the lines and echo the file's real bytes.
-	res := editOnce(filePath, "    if ok {\n        println(\"hi\")\n    }", "    if ok {\n        println(\"bye\")\n    }", tmpDir)
-	if res.Success {
-		t.Fatal("indentation mismatch must not be applied")
-	}
-	if !strings.Contains(res.Error, "lines 2-4") {
-		t.Fatalf("error should locate the mismatch, got: %s", res.Error)
-	}
-	if !strings.Contains(res.Error, "\tif ok {") {
-		t.Fatalf("error should echo the file's actual tab-indented lines, got: %s", res.Error)
-	}
-	got, _ := os.ReadFile(filePath)
-	if string(got) != content {
-		t.Fatalf("file must be unchanged, got %q", got)
-	}
+	t.Fatalf("lineIndex: %q not found in %s", lineContent, filePath)
+	return 0
 }
 
 func TestEditRequiresReadFirst(t *testing.T) {
+	ResetFileViews()
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "unread.txt")
 	if err := os.WriteFile(filePath, []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	res := editOnce(filePath, "hello", "goodbye", tmpDir)
+	tag := ComputeFileHash("hello\n")
+	helloRef := buildRef(1, "hello")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": helloRef, "to": helloRef, "content": "goodbye"},
+		},
+	}, tmpDir)
 	if res.Success || !strings.Contains(res.Error, "has not been read in this session") {
 		t.Fatalf("edit without read must be rejected, got: %+v", res)
 	}
 }
 
-func TestEditStaleViewSoftApply(t *testing.T) {
+func TestEditStaleFileTagRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "stale.txt")
 	if err := os.WriteFile(filePath, []byte("alpha\nbeta\n"), 0o644); err != nil {
@@ -135,44 +72,116 @@ func TestEditStaleViewSoftApply(t *testing.T) {
 	}
 	readForEdit(t, filePath, tmpDir)
 
-	// External modification after the read. The edit target still matches
-	// exactly and uniquely, so it applies — with a warning, not a block.
-	if err := os.WriteFile(filePath, []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
-		t.Fatal(err)
+	betaRef := buildRef(2, "beta")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  "DEAD",
+		"edits": []any{
+			map[string]any{"from": betaRef, "to": betaRef, "content": "BETA"},
+		},
+	}, tmpDir)
+	if res.Success || !strings.Contains(res.Error, "stale") {
+		t.Fatalf("stale file tag must be rejected, got: %+v", res)
 	}
-	res := editOnce(filePath, "beta", "BETA", tmpDir)
-	if !res.Success {
-		t.Fatalf("clean match on a stale view should apply, got: %s", res.Error)
-	}
-	if !strings.Contains(res.Output, "applied cleanly") || !strings.Contains(res.Output, "changed on disk") {
-		t.Fatalf("stale apply should carry the warning note, got: %s", res.Output)
-	}
+	// File must be unchanged.
 	got, _ := os.ReadFile(filePath)
-	if string(got) != "alpha\nBETA\ngamma\n" {
-		t.Fatalf("file content = %q", got)
+	if string(got) != "alpha\nbeta\n" {
+		t.Fatalf("file was silently modified to %q", string(got))
 	}
 }
 
-func TestEditStaleViewMismatchNamesStaleness(t *testing.T) {
+func TestEditStaleLineHashRejected(t *testing.T) {
 	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "stale2.txt")
-	if err := os.WriteFile(filePath, []byte("hello\n"), 0o644); err != nil {
+	filePath := filepath.Join(tmpDir, "linestale.txt")
+	if err := os.WriteFile(filePath, []byte("alpha\nbeta\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	readForEdit(t, filePath, tmpDir)
+	tag := readForEdit(t, filePath, tmpDir)
 
-	if err := os.WriteFile(filePath, []byte("something else entirely\n"), 0o644); err != nil {
+	// Wrong hash for line 2.
+	wrongRef := buildRef(2, "DIFFERENT_CONTENT")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": wrongRef, "to": wrongRef, "content": "X"},
+		},
+	}, tmpDir)
+	if res.Success || !strings.Contains(res.Error, "stale") {
+		t.Fatalf("stale line hash must be rejected, got: %+v", res)
+	}
+}
+
+func TestEditSingleLineReplace(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "replace.txt")
+	if err := os.WriteFile(filePath, []byte("count := 1\nprint(count)\nreturn count\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := editOnce(filePath, "hello", "goodbye", tmpDir)
-	if res.Success || !strings.Contains(res.Error, "changed on disk after it was last read") || !strings.Contains(res.Error, "Read the file again") {
-		t.Fatalf("stale mismatch should name the staleness and the recovery, got: %+v", res)
+	tag := readForEdit(t, filePath, tmpDir)
+	ref := buildRef(1, "count := 1")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": ref, "to": ref, "content": "count := 42"},
+		},
+	}, tmpDir)
+	if !res.Success {
+		t.Fatalf("single-line replace failed: %s", res.Error)
 	}
+	got, _ := os.ReadFile(filePath)
+	if !strings.Contains(string(got), "count := 42") {
+		t.Fatalf("file content = %q", string(got))
+	}
+}
 
-	// Re-reading clears the staleness.
-	readForEdit(t, filePath, tmpDir)
-	if res := editOnce(filePath, "something else", "anything", tmpDir); !res.Success {
-		t.Fatalf("edit after re-read should succeed, got: %s", res.Error)
+func TestEditRangeReplace(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "range.txt")
+	if err := os.WriteFile(filePath, []byte("a\nb\nc\nd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tag := readForEdit(t, filePath, tmpDir)
+	fromRef := buildRef(2, "b")
+	toRef := buildRef(3, "c")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": fromRef, "to": toRef, "content": "X\nY"},
+		},
+	}, tmpDir)
+	if !res.Success {
+		t.Fatalf("range replace failed: %s", res.Error)
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != "a\nX\nY\nd\n" {
+		t.Fatalf("file content = %q", string(got))
+	}
+}
+
+func TestEditDeleteLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "delete.txt")
+	if err := os.WriteFile(filePath, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tag := readForEdit(t, filePath, tmpDir)
+	ref := buildRef(2, "b")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": ref, "to": ref}, // no content = delete
+		},
+	}, tmpDir)
+	if !res.Success {
+		t.Fatalf("delete line failed: %s", res.Error)
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != "a\nc\n" {
+		t.Fatalf("file content = %q", string(got))
 	}
 }
 
@@ -184,10 +193,18 @@ func TestResetFileViewsForgetsObservations(t *testing.T) {
 	}
 	readForEdit(t, filePath, tmpDir)
 
-	// /clear and session switches reset the views: the new conversation has
-	// no Read results, so the gate must demand a fresh Read.
+	// /clear and session switches reset the views.
 	ResetFileViews()
-	res := editOnce(filePath, "hello", "goodbye", tmpDir)
+
+	tag := ComputeFileHash("hello\n")
+	helloRef := buildRef(1, "hello")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": helloRef, "to": helloRef, "content": "goodbye"},
+		},
+	}, tmpDir)
 	if res.Success || !strings.Contains(res.Error, "has not been read in this session") {
 		t.Fatalf("edit after view reset must require a fresh read, got: %+v", res)
 	}
@@ -197,28 +214,27 @@ func TestEditAfterOwnWriteNeedsNoRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "hello.txt")
 
-	// The exact flow from live testing: Write a new file, then Edit it
-	// repeatedly — no Read anywhere. The tool's own results are the view.
+	// Write a new file — no Read needed.
 	written := (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
 		"file_path": filePath,
-		"content":   "123",
+		"content":   "first\nsecond\n",
 	}, tmpDir)
 	if !written.Success {
 		t.Fatalf("write failed: %s", written.Error)
 	}
-	res := editOnce(filePath, "123", "23", tmpDir)
+
+	// Edit immediately after Write — view is current because Write recorded it.
+	tag := ComputeFileHash("first\nsecond\n")
+	firstRef := buildRef(1, "first")
+	res := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": firstRef, "to": firstRef, "content": "FIRST"},
+		},
+	}, tmpDir)
 	if !res.Success {
 		t.Fatalf("edit after own Write should need no Read, got: %s", res.Error)
-	}
-	if !strings.Contains(res.Output, "no need to re-read") {
-		t.Fatalf("fresh edit result should suppress the verify-read reflex, got: %s", res.Output)
-	}
-	if res := editOnce(filePath, "23", "5", tmpDir); !res.Success {
-		t.Fatalf("edit after own Edit should need no Read, got: %s", res.Error)
-	}
-	got, _ := os.ReadFile(filePath)
-	if string(got) != "5" {
-		t.Fatalf("file content = %q", got)
 	}
 }
 
@@ -228,58 +244,77 @@ func TestEditKeepsOwnWriteFresh(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Ensure the second edit happens with a different mtime than the read;
-	// only the tool's own view refresh keeps it current.
+	// Ensure the second edit happens with a different mtime than the read.
 	old := time.Now().Add(-time.Minute)
 	if err := os.Chtimes(filePath, old, old); err != nil {
 		t.Fatal(err)
 	}
-	readForEdit(t, filePath, tmpDir)
 
-	if res := editOnce(filePath, "one", "1", tmpDir); !res.Success || strings.Contains(res.Output, "applied cleanly") {
-		t.Fatalf("first edit should be a plain fresh apply: %+v", res)
+	tag := readForEdit(t, filePath, tmpDir)
+
+	// First edit: replace "one".
+	oneRef := buildRef(1, "one")
+	res1 := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": oneRef, "to": oneRef, "content": "1"},
+		},
+	}, tmpDir)
+	if !res1.Success {
+		t.Fatalf("first edit failed: %s", res1.Error)
 	}
-	if res := editOnce(filePath, "two", "2", tmpDir); !res.Success || strings.Contains(res.Output, "applied cleanly") {
-		t.Fatalf("second edit after own write should stay current, got: %+v", res)
+
+	// Second edit: re-read first (snapshot invalidated after edit).
+	tag2 := readForEdit(t, filePath, tmpDir)
+	twoRef := buildRef(2, "two")
+	res2 := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag2,
+		"edits": []any{
+			map[string]any{"from": twoRef, "to": twoRef, "content": "2"},
+		},
+	}, tmpDir)
+	if !res2.Success {
+		t.Fatalf("second edit failed: %s", res2.Error)
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != "1\n2\n" {
+		t.Fatalf("file content = %q", string(got))
 	}
 }
 
-func TestWriteOverwriteRequiresCurrentView(t *testing.T) {
+func TestWriteOverwriteRequiresCurrentViewFromEdit(t *testing.T) {
 	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "target.txt")
+	filePath := filepath.Join(tmpDir, "target2.txt")
 	if err := os.WriteFile(filePath, []byte("original\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	write := func() toolresult.ToolResult {
-		return (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
-			"file_path": filePath,
-			"content":   "replaced\n",
-		}, tmpDir)
-	}
-
-	if res := write(); res.Success || !strings.Contains(res.Error, "has not been read in this session") {
+	res := (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"content":   "replaced\n",
+	}, tmpDir)
+	if res.Success || !strings.Contains(res.Error, "has not been read in this session") {
 		t.Fatalf("overwrite without read must be rejected, got: %+v", res)
 	}
 
 	readForEdit(t, filePath, tmpDir)
-	res := write()
+	res = (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"content":   "replaced\n",
+	}, tmpDir)
 	if !res.Success {
 		t.Fatalf("overwrite after read should succeed, got: %s", res.Error)
 	}
 	if !strings.Contains(res.Output, "use Edit for modifications") {
 		t.Fatalf("overwrite result should nudge toward Edit, got: %s", res.Output)
 	}
-	got, _ := os.ReadFile(filePath)
-	if string(got) != "replaced\n" {
-		t.Fatalf("file content = %q", got)
-	}
 }
 
-func TestWriteNewFileNeedsNoRead(t *testing.T) {
+func TestWriteNewFileNeedsNoReadFromEdit(t *testing.T) {
 	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "fresh.txt")
-
+	filePath := filepath.Join(tmpDir, "fresh2.txt")
 	res := (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
 		"file_path": filePath,
 		"content":   "hello\n",

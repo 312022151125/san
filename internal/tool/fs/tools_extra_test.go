@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/genai-io/san/internal/tool/toolresult"
 )
 
 // TestRead_LineLimit_LargeFile verifies that Read respects the limit parameter
@@ -26,11 +24,11 @@ func TestRead_LineLimit_LargeFile(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	tool := &ReadTool{}
+	rt := &ReadTool{}
 	ctx := context.Background()
 
 	t.Run("reads all lines by default (up to maxReadLines)", func(t *testing.T) {
-		result := tool.Execute(ctx, map[string]any{
+		result := rt.Execute(ctx, map[string]any{
 			"file_path": filePath,
 		}, tmpDir)
 
@@ -48,7 +46,7 @@ func TestRead_LineLimit_LargeFile(t *testing.T) {
 
 	t.Run("limit parameter restricts number of lines returned", func(t *testing.T) {
 		limit := 50
-		result := tool.Execute(ctx, map[string]any{
+		result := rt.Execute(ctx, map[string]any{
 			"file_path": filePath,
 			"limit":     float64(limit), // JSON numbers come as float64
 		}, tmpDir)
@@ -65,7 +63,7 @@ func TestRead_LineLimit_LargeFile(t *testing.T) {
 	})
 
 	t.Run("limit=1 returns exactly one line", func(t *testing.T) {
-		result := tool.Execute(ctx, map[string]any{
+		result := rt.Execute(ctx, map[string]any{
 			"file_path": filePath,
 			"limit":     float64(1),
 		}, tmpDir)
@@ -82,7 +80,7 @@ func TestRead_LineLimit_LargeFile(t *testing.T) {
 	})
 
 	t.Run("offset skips lines before reading", func(t *testing.T) {
-		result := tool.Execute(ctx, map[string]any{
+		result := rt.Execute(ctx, map[string]any{
 			"file_path": filePath,
 			"offset":    float64(100),
 			"limit":     float64(10),
@@ -164,69 +162,387 @@ func TestReadEmptyFileSaysSo(t *testing.T) {
 }
 
 // readForEdit satisfies Edit/Write's read-before-modify gate in tests.
-func readForEdit(t *testing.T, filePath, cwd string) {
+// Returns the file TAG extracted from the hashline Read output.
+func readForEdit(t *testing.T, filePath, cwd string) string {
 	t.Helper()
 	result := (&ReadTool{}).Execute(context.Background(), map[string]any{"file_path": filePath}, cwd)
 	if !result.Success {
 		t.Fatalf("Read before edit failed: %s", result.FormatForLLM())
 	}
+	// Extract TAG from first line "@file path#TAG".
+	out := result.FormatForLLM()
+	firstLine := strings.SplitN(out, "\n", 2)[0]
+	idx := strings.LastIndexByte(firstLine, '#')
+	if idx < 0 {
+		t.Fatalf("Read output missing @file header: %q", firstLine)
+	}
+	return firstLine[idx+1:]
 }
 
-func TestEditPreservesBomAndCrlf(t *testing.T) {
+// editFile is a test helper for a single-edit hashline Edit call.
+func editFile(t *testing.T, filePath, cwd, tag string, edits []any) bool {
+	t.Helper()
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits":     edits,
+	}, cwd)
+	return result.Success
+}
+
+// TestEditPreservesBOM verifies that BOM is stripped for hashing and that
+// the edit result does not corrupt a BOM-prefixed file.
+func TestEditPreservesBOM(t *testing.T) {
 	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "example.txt")
-	original := "\ufefftitle: old\r\nfirst: old\r\nsecond: keep\r\n"
+	filePath := filepath.Join(tmpDir, "bom.txt")
+	original := "\ufefftitle: old\nfirst: keep\n"
 	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	readForEdit(t, filePath, tmpDir)
+	tag := readForEdit(t, filePath, tmpDir)
 
-	// Sequential edits, the way multiple changes land under the CC-shaped
-	// schema. old_string/new_string arrive LF-normalized like model output.
+	titleRef := buildRef(1, "title: old")
 	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
-		"file_path":  filePath,
-		"old_string": "title: old\n",
-		"new_string": "title: new\n",
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": titleRef, "to": titleRef, "content": "title: new"},
+		},
 	}, tmpDir)
 	if !result.Success {
-		t.Fatalf("first edit failed: %s", result.FormatForLLM())
+		t.Fatalf("edit failed: %s", result.Error)
 	}
-	details, ok := result.Details.(toolresult.FileChangeDetails)
-	if !ok || details.EditCount != 1 || details.AddedLines != 1 || details.RemovedLines != 1 {
-		t.Fatalf("Edit details = %#v", result.Details)
-	}
-	if res := editOnce(filePath, "second: keep", "second: new", tmpDir); !res.Success {
-		t.Fatalf("second edit failed: %s", res.Error)
-	}
-	content, err := os.ReadFile(filePath)
+	got, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(content), "\ufefftitle: new\r\nfirst: old\r\nsecond: new\r\n"; got != want {
-		t.Fatalf("file content = %q, want %q", got, want)
+	want := "\ufefftitle: new\nfirst: keep\n"
+	if string(got) != want {
+		t.Errorf("file content = %q, want %q", string(got), want)
 	}
+}
 
-	// Failed edits leave the file untouched and name the problem.
+// TestEditPreservesCRLF verifies that CRLF line endings survive a hashline edit.
+func TestEditPreservesCRLF(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "crlf.txt")
+	original := "first: old\r\nsecond: keep\r\n"
 	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	tag := readForEdit(t, filePath, tmpDir)
+
+	firstRef := buildRef(1, "first: old")
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": firstRef, "to": firstRef, "content": "first: new"},
+		},
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("CRLF edit failed: %s", result.Error)
+	}
+	got, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "first: new\r\nsecond: keep\r\n"
+	if string(got) != want {
+		t.Errorf("CRLF file = %q, want %q", string(got), want)
+	}
+}
+
+// TestWriteOverwriteRequiresCurrentView verifies Write still enforces read-before-overwrite.
+func TestWriteOverwriteRequiresCurrentView(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "target.txt")
+	if err := os.WriteFile(filePath, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	write := func() bool {
+		res := (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
+			"file_path": filePath,
+			"content":   "replaced\n",
+		}, tmpDir)
+		return res.Success
+	}
+
+	if write() {
+		t.Fatal("overwrite without read must be rejected")
+	}
+
 	readForEdit(t, filePath, tmpDir)
-	for _, test := range []struct {
-		oldString, want string
-	}{
-		{"missing", "old_string was not found"},
-		{"old", "old_string matches 2 locations"},
-	} {
-		failed := editOnce(filePath, test.oldString, "replacement", tmpDir)
-		if failed.Success || !strings.Contains(failed.Error, test.want) {
-			t.Fatalf("invalid edit = %+v, want %q", failed, test.want)
+	if !write() {
+		t.Fatal("overwrite after read should succeed")
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != "replaced\n" {
+		t.Fatalf("file content = %q", got)
+	}
+}
+
+// TestWriteNewFileNeedsNoRead verifies Write can create a new file without a prior Read.
+func TestWriteNewFileNeedsNoRead(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "fresh.txt")
+	res := (&WriteTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"content":   "hello\n",
+	}, tmpDir)
+	if !res.Success {
+		t.Fatalf("creating a new file must not require a read, got: %s", res.Error)
+	}
+}
+
+// --- Hashline Read output format tests ---
+
+// readFileTag reads a file and returns the file TAG from the @file header.
+func readFileTag(t *testing.T, filePath, cwd string) string {
+	t.Helper()
+	return readForEdit(t, filePath, cwd)
+}
+
+// TestHashlineRead_OutputFormat verifies the @file header and LINE#hash|content format.
+func TestHashlineRead_OutputFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "sample.txt")
+	content := "first line\nsecond line\nthird line\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{"file_path": filePath}, tmpDir)
+	if !result.Success {
+		t.Fatal(result.Error)
+	}
+	output := result.FormatForLLM()
+	tag := readFileTag(t, filePath, tmpDir)
+
+	// File tag must be 4 hex chars.
+	if len(tag) != 4 {
+		t.Errorf("file tag %q has length %d, want 4", tag, len(tag))
+	}
+	for _, c := range tag {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+			t.Errorf("file tag %q has non-hex char %q", tag, c)
 		}
-		content, err = os.ReadFile(filePath)
-		if err != nil {
-			t.Fatal(err)
+	}
+
+	// Lines must be LINE#hash|content format.
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	// lines[0] is the @file header; rest are LINE#hash|content
+	for i, l := range lines[1:] {
+		lineNo := i + 1
+		prefix := fmt.Sprintf("%d#", lineNo)
+		if !strings.HasPrefix(l, prefix) {
+			t.Errorf("line %d: missing prefix %q in %q", lineNo, prefix, l)
+			continue
 		}
-		if got := string(content); got != original {
-			t.Fatalf("invalid edit changed file to %q", got)
+		rest := l[len(prefix):]
+		pipeIdx := strings.IndexByte(rest, '|')
+		if pipeIdx != 3 {
+			t.Errorf("line %d: hash should be 3 chars before |, got pos %d in %q", lineNo, pipeIdx, rest)
 		}
+	}
+}
+
+// TestHashlineRead_FileTagCoversFullFile verifies that a windowed read still
+// returns the whole-file TAG, not a partial one.
+func TestHashlineRead_FileTagCoversFullFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "big.txt")
+	var sb strings.Builder
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&sb, "line%d\n", i)
+	}
+	content := sb.String()
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Full read tag.
+	fullTag := readForEdit(t, filePath, tmpDir)
+
+	// Windowed read (lines 5–10) should carry the same full-file tag.
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path": filePath,
+		"offset":    float64(5),
+		"limit":     float64(6),
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("windowed Read failed: %s", result.Error)
+	}
+	firstLine := strings.SplitN(result.FormatForLLM(), "\n", 2)[0]
+	idx := strings.LastIndexByte(firstLine, '#')
+	windowTag := firstLine[idx+1:]
+
+	if fullTag != windowTag {
+		t.Errorf("window tag %q != full tag %q", windowTag, fullTag)
+	}
+}
+
+// --- Edit integration tests ---
+
+// TestEdit_FullFlow exercises the Read → Edit → verify cycle.
+func TestEdit_FullFlow(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "edit_me.txt")
+	original := "alpha\nbeta\ngamma\n"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tag := readForEdit(t, filePath, tmpDir)
+
+	betaRef := buildRef(2, "beta")
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": betaRef, "to": betaRef, "content": "BETA"},
+		},
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("Edit failed: %s / %s", result.Output, result.Error)
+	}
+	if !strings.Contains(result.Output, "snapshot invalidated") {
+		t.Errorf("success result should mention snapshot invalidation, got: %q", result.Output)
+	}
+
+	got, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "alpha\nBETA\ngamma\n" {
+		t.Errorf("file content = %q want %q", string(got), "alpha\nBETA\ngamma\n")
+	}
+}
+
+// TestEdit_StaleFileTag verifies that an Edit with stale TAG is rejected.
+func TestEdit_StaleFileTag(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "stale.txt")
+	original := "alpha\nbeta\n"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readForEdit(t, filePath, tmpDir)
+
+	betaRef := buildRef(2, "beta")
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  "DEAD",
+		"edits": []any{
+			map[string]any{"from": betaRef, "to": betaRef, "content": "BETA"},
+		},
+	}, tmpDir)
+	if result.Success {
+		t.Fatal("expected Edit to fail with stale file tag")
+	}
+	if !strings.Contains(result.Error, "stale") && !strings.Contains(result.Error, "tag") {
+		t.Errorf("error should mention stale/tag, got: %q", result.Error)
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != original {
+		t.Errorf("stale-tag edit changed file to %q", string(got))
+	}
+}
+
+// TestEdit_StaleLineHash verifies that an Edit with stale line hash is rejected.
+func TestEdit_StaleLineHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "linemismatch.txt")
+	original := "alpha\nbeta\ngamma\n"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tag := readForEdit(t, filePath, tmpDir)
+
+	wrongRef := fmt.Sprintf("2#%s", ComputeLineHash("WRONG_CONTENT"))
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": wrongRef, "to": wrongRef, "content": "X"},
+		},
+	}, tmpDir)
+	if result.Success {
+		t.Fatal("expected Edit to fail with stale line hash")
+	}
+	if !strings.Contains(result.Error, "stale") {
+		t.Errorf("error should mention stale, got: %q", result.Error)
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != original {
+		t.Errorf("stale-line-hash edit changed file to %q", string(got))
+	}
+}
+
+// TestEdit_ConcurrentModification verifies that if the file changes on disk
+// after read but before edit, the TAG mismatch catches it.
+func TestEdit_ConcurrentModification(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "concurrent.txt")
+	original := "line1\nline2\n"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tag := readForEdit(t, filePath, tmpDir)
+
+	// Simulate concurrent modification.
+	modified := "line1\nMODIFIED\n"
+	if err := os.WriteFile(filePath, []byte(modified), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Refresh the mtime stamp so the mtime check doesn't fire first.
+	recordFileWritten(filePath)
+
+	line1Ref := buildRef(1, "line1")
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": line1Ref, "to": line1Ref, "content": "NEW_LINE1"},
+		},
+	}, tmpDir)
+	if result.Success {
+		t.Fatal("expected Edit to fail when file was concurrently modified")
+	}
+	got, _ := os.ReadFile(filePath)
+	if string(got) != modified {
+		t.Errorf("concurrent edit changed file to %q (should stay as %q)", string(got), modified)
+	}
+}
+
+// TestEdit_RequiresObservedView verifies that Edit fails if the file
+// has never been Read this session.
+func TestEdit_RequiresObservedView(t *testing.T) {
+	ResetFileViews()
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "unread.txt")
+	content := "a\nb\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tag := ComputeFileHash(content)
+
+	aRef := buildRef(1, "a")
+	result := (&EditTool{}).ExecuteApproved(context.Background(), map[string]any{
+		"file_path": filePath,
+		"file_tag":  tag,
+		"edits": []any{
+			map[string]any{"from": aRef, "to": aRef, "content": "A"},
+		},
+	}, tmpDir)
+	if result.Success {
+		t.Fatal("expected Edit to fail when file was never read this session")
+	}
+	if !strings.Contains(result.Error, "not been read") && !strings.Contains(result.Error, "Read it") {
+		t.Errorf("error should instruct to read first, got: %q", result.Error)
 	}
 }

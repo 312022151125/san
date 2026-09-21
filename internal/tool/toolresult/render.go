@@ -1,9 +1,6 @@
 package toolresult
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // FileChangeDetails describes an applied Edit or Write for UI rendering.
 type FileChangeDetails struct {
@@ -47,11 +44,6 @@ func NewErrorResult(title, errorMsg string) ToolResult {
 	}
 }
 
-// LineNumberFormat is the "line number, tab, content" shape of Read output.
-// Edit's mismatch diagnostics echo file lines in the same format, so the two
-// must stay one definition.
-const LineNumberFormat = "%6d\t%s\n"
-
 // FormatForLLM returns a plain text representation of the result for LLM consumption
 func (r ToolResult) FormatForLLM() string {
 	if !r.Success {
@@ -63,26 +55,10 @@ func (r ToolResult) FormatForLLM() string {
 
 	var sb strings.Builder
 
-	switch r.Metadata.Title {
-	case "Read":
-		if len(r.Lines) > 0 {
-			sb.Grow(len(r.Lines) * 40)
-			for _, line := range r.Lines {
-				fmt.Fprintf(&sb, LineNumberFormat, line.LineNo, line.Text)
-			}
-			// A trailing note (e.g. "output truncated at line N") must reach
-			// the model along with the lines.
-			if r.Output != "" {
-				sb.WriteString(r.Output)
-				sb.WriteByte('\n')
-			}
-		} else if r.Output != "" {
-			sb.WriteString(r.Output)
-		}
-	default:
-		if r.Output != "" {
-			sb.WriteString(r.Output)
-		}
+	// Read results carry the full hashline block in Output (the @file header
+	// plus LINE#hash|content lines). Lines is kept only for the TUI renderer.
+	if r.Output != "" {
+		sb.WriteString(r.Output)
 	}
 
 	return sb.String()

@@ -15,6 +15,22 @@ import (
 	"github.com/genai-io/san/internal/tool/toolresult"
 )
 
+// hashlineReadOutput builds the hashline-format block for a Read result:
+// a @file path#TAG header followed by LINE#hash|content lines for the
+// windowed range. The file TAG covers the complete file (fullContent),
+// not just the window, so Edit anchors are always valid even on partial reads.
+func hashlineReadOutput(fullContent, relPath string, lines []toolresult.ContentLine) string {
+	tag := ComputeFileHash(fullContent)
+	var b strings.Builder
+	b.WriteString(FormatFileHeader(relPath, tag))
+	b.WriteByte('\n')
+	for _, l := range lines {
+		b.WriteString(FormatHashline(l.LineNo, l.Text))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 const (
 	maxReadLines  = 2000
 	maxLineLength = 2000
@@ -178,11 +194,40 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 		startLine = offset
 	}
 
-	// Build result
-	result := toolresult.ToolResult{
+	// Always use hashline output format: @file path#TAG header + LINE#hash|content.
+	// Re-read full file content to compute the whole-file TAG so Edit anchors
+	// are valid regardless of the offset/limit window used here.
+	var hlOutput string
+	if len(lines) > 0 {
+		fullBytes, readErr := os.ReadFile(filePath)
+		if readErr == nil {
+			// Normalise to the same form that Edit's prepareEditContent uses
+			// (strip BOM, CRLF→LF) so the TAG matches what Edit will verify.
+			fullContent := strings.TrimPrefix(string(fullBytes), "\ufeff")
+			fullContent = strings.ReplaceAll(fullContent, "\r\n", "\n")
+			relPath := filePath
+			if cwd != "" {
+				if rel, relErr := filepath.Rel(cwd, filePath); relErr == nil {
+					relPath = rel
+				}
+			}
+			hlOutput = hashlineReadOutput(fullContent, relPath, lines)
+			if truncated {
+				lastLine := lines[len(lines)-1].LineNo
+				hlOutput += fmt.Sprintf("(output truncated at line %d; continue with offset=%d)\n", lastLine, lastLine+1)
+			}
+		}
+	}
+
+	// resultNote remains as-is for empty/out-of-range cases.
+	if hlOutput == "" {
+		hlOutput = resultNote
+	}
+
+	return toolresult.ToolResult{
 		Success: true,
-		Output:  resultNote,
-		Lines:   lines,
+		Output:  hlOutput,
+		Lines:   lines, // kept for the TUI renderer (renderLines)
 		HookResponse: map[string]any{
 			"type": "text",
 			"file": map[string]any{
@@ -203,8 +248,6 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 			Truncated: truncated,
 		},
 	}
-
-	return result
 }
 
 // isImagePath reports whether the file is an image by extension, matching
