@@ -132,6 +132,41 @@ func TestZenAPIForModelFamily(t *testing.T) {
 	}
 }
 
+// TestZenInferSetsCompatWithAPI verifies that zenInfer sets the Compat type
+// that matches each model's API, so the SDK's checkCompat() validation never
+// sees the "compat mismatch" error that surfaced for muse-spark-1.3-contributor-free
+// and any other Responses/Anthropic model the vendor default would have stamped
+// with OpenAIChatCompat.
+func TestZenInferSetsCompatWithAPI(t *testing.T) {
+	cases := []struct {
+		id        string
+		wantAPI   ai.API
+		wantCompat any
+	}{
+		{"gpt-5.5", ai.APIOpenAIResponses, ai.OpenAIResponsesCompat{}},
+		{"muse-spark-1.3-contributor-free", ai.APIOpenAIResponses, ai.OpenAIResponsesCompat{}},
+		{"grok-4.5", ai.APIOpenAIResponses, ai.OpenAIResponsesCompat{}},
+		{"claude-sonnet-5", ai.APIAnthropicMessages, ai.AnthropicCompat{}},
+		{"qwen3.7-plus", ai.APIAnthropicMessages, ai.AnthropicCompat{}},
+		{"glm-5.1", ai.APIOpenAIChat, ai.OpenAIChatCompat{}},
+		{"deepseek-v4-pro", ai.APIOpenAIChat, ai.OpenAIChatCompat{}},
+		{"kimi-k2.5", ai.APIOpenAIChat, ai.OpenAIChatCompat{}},
+		// Unknown families pass through unchanged (vendor defaults remain).
+		{"jev-1.13", ai.APIOpenAIChat, ai.OpenAIChatCompat{}},
+	}
+	for _, tc := range cases {
+		// Simulate decorate(): stamp vendor defaults then call Infer.
+		m := ai.Model{ID: tc.id, API: ai.APIOpenAIChat, Compat: ai.OpenAIChatCompat{}}
+		m = zenInfer(m)
+		if m.API != tc.wantAPI {
+			t.Errorf("zenInfer(%q).API = %q, want %q", tc.id, m.API, tc.wantAPI)
+		}
+		if m.Compat != tc.wantCompat {
+			t.Errorf("zenInfer(%q).Compat = %T(%v), want %T(%v)", tc.id, m.Compat, m.Compat, tc.wantCompat, tc.wantCompat)
+		}
+	}
+}
+
 // TestZenListModelsKeepsKnownFamilies checks that zenModels retains models from
 // all three routable protocol families and drops entries whose family is unknown
 // or excluded (gemini, jev, etc.).
