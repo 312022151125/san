@@ -5,12 +5,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/san/internal/core"
 )
+
+// sessionIDPattern matches the canonical ses_<12 hex><14 alphanum> format
+// the OpenCode Zen gateway requires for x-opencode-session.
+var sessionIDPattern = regexp.MustCompile(`^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$`)
 
 // openZen points the opencode-zen entry at the stub the way production opens
 // it: through the table's own factory, so the test covers the row as shipped.
@@ -58,6 +63,9 @@ func TestZenTurnSendsIdentityAndSurfacesErrors(t *testing.T) {
 	if got := e.headers.Get("User-Agent"); got != zenUserAgent {
 		t.Errorf("User-Agent = %q, want %q", got, zenUserAgent)
 	}
+	if got := e.headers.Get("x-opencode-session"); !sessionIDPattern.MatchString(got) {
+		t.Errorf("x-opencode-session = %q, want ses_<12 hex><14 alphanum>", got)
+	}
 	if !strings.Contains(fmt.Sprint(e.body), zenModel) {
 		t.Errorf("request body %v names no model", e.body)
 	}
@@ -75,10 +83,21 @@ func TestZenTurnSendsIdentityAndSurfacesErrors(t *testing.T) {
 	}
 }
 
-// ponytail: old chat-only filter removed by multi-protocol contract —
-// TestZenListModelsFiltersChatCompletions asserted the single-protocol
-// behavior (keep only glm-/deepseek-/etc, drop gpt-/claude-/gemini-).
-// Replaced by TestZenListModelsKeepsAllFamilies below.
+func TestZenNewSessionID(t *testing.T) {
+	id := zenNewSessionID()
+	if !sessionIDPattern.MatchString(id) {
+		t.Fatalf("zenNewSessionID = %q, want ses_<12 hex><14 alphanum>", id)
+	}
+	// Two calls must not collide.
+	if zenNewSessionID() == id {
+		t.Fatal("zenNewSessionID returned the same ID twice — entropy problem")
+	}
+}
+
+// TestZenAPIForModelFamily verifies the family→protocol mapping used both by
+// zenModels (listing filter) and zenVendor's Infer hook (inference routing).
+// Gemini is intentionally excluded: its per-model endpoint URL cannot be
+// derived from the shared base URL that the Google GenAI driver expects.
 func TestZenAPIForModelFamily(t *testing.T) {
 	cases := []struct {
 		id   string
@@ -98,8 +117,9 @@ func TestZenAPIForModelFamily(t *testing.T) {
 		{"kimi-k2.5", ai.APIOpenAIChat},
 		{"minimax-m3", ai.APIOpenAIChat},
 		{"big-pickle", ai.APIOpenAIChat},
-		{"gemini-3-flash", ai.APIGoogleGenAI},
-		{"gemini-3-pro", ai.APIGoogleGenAI},
+		// gemini-* excluded: per-model URL, not routable from a shared base.
+		{"gemini-3-flash", ai.API("")},
+		{"gemini-3-pro", ai.API("")},
 		{"jev-1.13", ai.API("")},
 	}
 	for _, tc := range cases {
@@ -109,7 +129,13 @@ func TestZenAPIForModelFamily(t *testing.T) {
 	}
 }
 
-func TestZenListModelsKeepsAllFamilies(t *testing.T) {
+// TestZenListModelsKeepsKnownFamilies checks that zenModels retains models from
+// all three routable protocol families and drops entries whose family is unknown
+// or excluded (gemini, jev, etc.).
+//
+// Protocol correctness (each model's API field) is asserted via the vendor's
+// Infer hook through p.endpoint.Models(), which is the path inference uses.
+func TestZenListModelsKeepsKnownFamilies(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
@@ -140,29 +166,55 @@ func TestZenListModelsKeepsAllFamilies(t *testing.T) {
 		t.Fatalf("ListModels: %v", err)
 	}
 
+	// gemini and jev are excluded; the rest must appear.
 	want := map[string]ai.API{
-		"gpt-5.5":        ai.APIOpenAIResponses,
-		"muse-spark-1.3": ai.APIOpenAIResponses,
-		"grok-4.5":       ai.APIOpenAIResponses,
+		"gpt-5.5":         ai.APIOpenAIResponses,
+		"muse-spark-1.3":  ai.APIOpenAIResponses,
+		"grok-4.5":        ai.APIOpenAIResponses,
 		"claude-sonnet-5": ai.APIAnthropicMessages,
-		"qwen3.7-plus":   ai.APIAnthropicMessages,
-		"glm-5.1":        ai.APIOpenAIChat,
+		"qwen3.7-plus":    ai.APIAnthropicMessages,
+		"glm-5.1":         ai.APIOpenAIChat,
 		"deepseek-v4-pro": ai.APIOpenAIChat,
-		"kimi-k2.5":      ai.APIOpenAIChat,
-		"gemini-3-flash": ai.APIGoogleGenAI,
+		"kimi-k2.5":       ai.APIOpenAIChat,
 	}
-	if len(models) != len(want) {
-		t.Fatalf("got %d models %v, want %d", len(models), models, len(want))
-	}
+
+	ids := make(map[string]bool, len(models))
 	for _, m := range models {
-		w, ok := want[m.ID]
+		ids[m.ID] = true
+	}
+	for id := range want {
+		if !ids[id] {
+			t.Errorf("ListModels missing %q", id)
+		}
+	}
+	if ids["jev-1.13"] {
+		t.Errorf("ListModels kept jev-1.13, unknown families must be skipped")
+	}
+	if ids["gemini-3-flash"] {
+		t.Errorf("ListModels kept gemini-3-flash, gemini is excluded from the shared-base routing")
+	}
+
+	// Protocol routing: p.endpoint.Models() goes through the vendor's Infer
+	// hook, which is the same path Client() uses for inference routing.
+	live := make(map[string]ai.API)
+	for _, m := range p.endpoint.Models() {
+		live[m.ID] = m.API
+	}
+	for id, w := range want {
+		got, ok := live[id]
 		if !ok {
-			t.Errorf("unexpected model %q (unknown IDs must be skipped)", m.ID)
+			t.Errorf("endpoint models missing %q", id)
 			continue
 		}
-		if m.API != w {
-			t.Errorf("model %q API = %q, want %q", m.ID, m.API, w)
+		if got != w {
+			t.Errorf("model %q API = %q, want %q", id, got, w)
 		}
+	}
+	if _, ok := live["jev-1.13"]; ok {
+		t.Errorf("endpoint kept jev-1.13, unknown families must be skipped")
+	}
+	if _, ok := live["gemini-3-flash"]; ok {
+		t.Errorf("endpoint kept gemini-3-flash, gemini excluded from shared-base routing")
 	}
 }
 

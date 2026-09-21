@@ -2,7 +2,10 @@ package llm
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"sync"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/sdk-go/pkg/ai/catalog"
@@ -285,29 +288,78 @@ func configureVolcengine(vendor catalog.Vendor, cfg *sdkprovider.Config) error {
 // protocol path itself, so this stays the root rather than a full endpoint.
 const zenBaseURL = "https://opencode.ai/zen/v1"
 
-// zenUserAgent identifies San's turns the way OpenCode's own CLI does.
-// ponytail: hard-coded to OpenCode 2.0.3; ceiling is one UA string for all
-// models. Per-family UAs or a version bump = one-line const change.
-const zenUserAgent = "opencode/latest/2.0.3/cli" // [INFERENCE] channel/name unconfirmed
+// zenUserAgent identifies San to the OpenCode Zen gateway.
+// The server requires "opencode/<version>" with version >= 1.17.0; any other
+// shape (omp/, Bun default, etc.) is rejected with 403 FreeTierError.
+// Bump alongside cmd/san/main.go whenever the San version changes.
+const zenUserAgent = "opencode/1.18.31"
 
-// zenModel is the one chat/completions-family model this row serves. Switching
-// models later is a one-line const change.
+// zenSessionOnce and zenSessionID together produce one stable ses_… ID for
+// the lifetime of the process. The server requires x-opencode-session to match
+// ses_[0-9a-f]{12}[0-9A-Za-z]{14}; a raw UUIDv4 / plain string is rejected.
+var (
+	zenSessionOnce sync.Once
+	zenSessionID   string
+)
+
+// zenNewSessionID generates a ses_<12 hex><14 alphanum> identifier.
+// The shape mirrors internal/session.GenerateTestSessionID but lives here to
+// avoid a feature→feature cycle between llm and session.
+func zenNewSessionID() string {
+	const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var b [20]byte
+	_, _ = rand.Read(b[:])
+	hexPart := hex.EncodeToString(b[0:6]) // 12 hex chars
+	tail := make([]byte, 14)
+	for i := range tail {
+		tail[i] = chars[b[6+i]%62]
+	}
+	return "ses_" + hexPart + string(tail)
+}
+
+// zenProcessSessionID returns the stable session ID for this process,
+// generating it on first call.
+func zenProcessSessionID() string {
+	zenSessionOnce.Do(func() { zenSessionID = zenNewSessionID() })
+	return zenSessionID
+}
+
+// zenModel is the fallback seed used when the live listing is unavailable.
 const zenModel = "glm-5.1"
 
 // zenVendor builds the catalog row for OpenCode Zen. It exists in no catalog,
-// so San supplies what a vendor entry would have said: the protocol, the host,
-// and the one hard-coded model.
+// so San supplies what a vendor entry would have said: the base URL, the
+// baseline fallback model, and the Infer hook that maps each model to the
+// correct wire protocol.
+//
+// All three protocol endpoints share the same base URL; the driver selected
+// by each model's API appends the correct path suffix automatically:
+//   - opencode.ai/zen/v1/responses      → APIOpenAIResponses  (gpt-*, grok-*, muse-spark-*)
+//   - opencode.ai/zen/v1/messages       → APIAnthropicMessages (claude-*, qwen*)
+//   - opencode.ai/zen/v1/chat/completions → APIOpenAIChat     (deepseek-*, glm-*, kimi-*, …)
+//
+// Gemini models use a per-model URL shape that the Google GenAI driver cannot
+// derive from a shared base; they are excluded from the live listing.
 // ponytail: inline row, no catalog entry exists.
 func zenVendor() catalog.Vendor {
 	return catalog.Vendor{
 		ID:          string(OpenCodeZen),
 		DisplayName: "OpenCode Zen",
-		API:         ai.APIOpenAIChat,
+		API:         ai.APIOpenAIChat, // baseline for unknown families
 		BaseURL:     zenBaseURL,
 		KeyEnv:      []string{"OPENCODE_ZEN_API_KEY"},
 		Input:       []ai.Modality{ai.ModalityText, ai.ModalityImage},
 		Compat:      ai.OpenAIChatCompat{},
-		Models:      []ai.Model{{ID: zenModel, Name: zenModel}},
+		Models:      []ai.Model{{ID: zenModel, Name: zenModel, API: ai.APIOpenAIChat}},
+		// Infer runs after decorate() stamps API=vendor.API, so it can
+		// override to the correct per-family protocol without changing the
+		// vendor default that the fallback model inherits.
+		Infer: func(m ai.Model) ai.Model {
+			if api := zenAPIForModel(m.ID); api != "" {
+				m.API = api
+			}
+			return m
+		},
 	}
 }
 
@@ -318,7 +370,10 @@ func configureZen(_ catalog.Vendor, cfg *sdkprovider.Config) error {
 	if cfg.BaseURL = secret.Resolve("OPENCODE_ZEN_BASE_URL"); cfg.BaseURL == "" {
 		cfg.BaseURL = zenBaseURL // hard-coded default; env only overrides (tests/escape hatch)
 	} // mirrors configureBigModelCoding precedent
-	cfg.Headers = map[string]string{"User-Agent": zenUserAgent}
+	cfg.Headers = map[string]string{
+		"User-Agent":         zenUserAgent,
+		"x-opencode-session": zenProcessSessionID(),
+	}
 	cfg.Fetch = zenModels
 	return nil
 }

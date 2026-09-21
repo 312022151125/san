@@ -193,7 +193,7 @@ func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error)
 	for _, m := range listing.Data {
 		api := zenAPIForModel(m.ID)
 		if m.ID == "" || api == "" {
-			continue
+			continue // unknown family or explicitly excluded (e.g. gemini)
 		}
 		models = append(models, ai.Model{
 			ID:   m.ID,
@@ -209,10 +209,16 @@ func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error)
 	return models, nil
 }
 
-// zenAPIForModel maps a Zen model ID to its wire protocol by family prefix,
-// case-insensitive. Family prefixes win over the "-free" tier suffix, so a
-// free variant still speaks its family's protocol. Unknown families return ""
-// so callers skip the entry instead of guessing chat.
+// zenAPIForModel maps a Zen model ID to the wire protocol its family uses at
+// the Zen gateway. All three families share the base URL; the driver appends
+// the correct path suffix (/responses, /messages, /chat/completions).
+//
+// Gemini models are intentionally excluded (return ""): their endpoint is
+// per-model (https://opencode.ai/zen/v1/models/<id>) and the Google GenAI
+// driver cannot derive that path from a shared base URL.
+//
+// Unknown families also return "" so callers skip the entry instead of
+// guessing a protocol that may reject the request.
 func zenAPIForModel(id string) ai.API {
 	lower := strings.ToLower(id)
 	switch {
@@ -223,8 +229,6 @@ func zenAPIForModel(id string) ai.API {
 	case strings.HasPrefix(lower, "claude-"),
 		strings.HasPrefix(lower, "qwen"):
 		return ai.APIAnthropicMessages
-	case strings.HasPrefix(lower, "gemini-"):
-		return ai.APIGoogleGenAI
 	case strings.HasPrefix(lower, "deepseek-"),
 		strings.HasPrefix(lower, "minimax-"),
 		strings.HasPrefix(lower, "glm-"),
@@ -235,15 +239,9 @@ func zenAPIForModel(id string) ai.API {
 		lower == "big-pickle":
 		return ai.APIOpenAIChat
 	default:
+		// gemini-* and unknown families: not routable through the shared base.
 		return ""
 	}
-}
-
-// isZenChatCompletionModel reports whether a Zen model speaks OpenAI chat
-// completions. Wrapper over the classifier; the filter loop uses the
-// classifier directly to keep the entry's own API.
-func isZenChatCompletionModel(id string) bool {
-	return zenAPIForModel(id) == ai.APIOpenAIChat
 }
 
 func zenErrorKind(status int) ai.ErrorKind {
