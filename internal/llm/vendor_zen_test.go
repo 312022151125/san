@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,97 @@ func TestZenTurnSendsIdentityAndSurfacesErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "zen quota exhausted") {
 		t.Errorf("error = %v, want the upstream body verbatim", err)
+	}
+}
+
+// TestZenIsFreeTierError checks the pattern that classifies the free-tier gate
+// denial so it is not mistaken for a credential failure.
+func TestZenIsFreeTierError(t *testing.T) {
+	cases := []struct {
+		body string
+		want bool
+	}{
+		// Canonical gateway response shape.
+		{`{"error":{"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}}`, true},
+		// Just the marker type without the full sentence.
+		{`403 request rejected (type=FreeTierError)`, true},
+		// The sentence without the type name.
+		{`{"message":"free tier can only be used from within OpenCode"}`, true},
+		// A different 403: genuine auth failure, must not match.
+		{`{"error":{"type":"AuthError","message":"invalid api key"}}`, false},
+		// A paid-SKU access denial must also not match.
+		{`{"error":{"message":"access to this model is denied for your plan"}}`, false},
+	}
+	for _, tc := range cases {
+		if got := isZenFreeTierError(tc.body); got != tc.want {
+			t.Errorf("isZenFreeTierError(%q) = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
+// TestZenErrorKindFreeTierIsInvalidRequest verifies that a 403 carrying the
+// free-tier gate body is KindInvalidRequest (client policy), not KindAuth
+// (bad credential). A genuine 403 without the marker stays KindAuth.
+func TestZenErrorKindFreeTierIsInvalidRequest(t *testing.T) {
+	freeTierBody := `{"error":{"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}}`
+	if got := zenErrorKind(http.StatusForbidden, freeTierBody); got != ai.KindInvalidRequest {
+		t.Errorf("zenErrorKind(403, freeTierBody) = %q, want KindInvalidRequest", got)
+	}
+	// A bare FreeTierError marker also qualifies.
+	if got := zenErrorKind(http.StatusForbidden, "403 FreeTierError: denied"); got != ai.KindInvalidRequest {
+		t.Errorf("zenErrorKind(403, bare marker) = %q, want KindInvalidRequest", got)
+	}
+	// A genuine credential 403 must still be KindAuth.
+	if got := zenErrorKind(http.StatusForbidden, `{"error":{"message":"invalid api key"}}`); got != ai.KindAuth {
+		t.Errorf("zenErrorKind(403, credential body) = %q, want KindAuth", got)
+	}
+	// 401 is always KindAuth regardless of body.
+	if got := zenErrorKind(http.StatusUnauthorized, freeTierBody); got != ai.KindAuth {
+		t.Errorf("zenErrorKind(401, freeTierBody) = %q, want KindAuth", got)
+	}
+}
+
+// TestZenFreeTierErrorMessageIsHelpful verifies that zenModels rewrites a
+// free-tier 403 body into an actionable explanation rather than surfacing the
+// raw gateway JSON, and that the "FreeTierError" marker survives in the
+// rewritten message for downstream pattern matching.
+//
+// Note: ListModels has a fallback path that suppresses the error when the
+// vendor seed is present (by design — a transient listing failure should not
+// block the picker). The test exercises zenModels directly as the Fetch hook
+// so the rewriting logic is tested in isolation.
+func TestZenFreeTierErrorMessageIsHelpful(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprint(w, `{"error":{"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	p := openZen(t, server.URL)
+	// Call zenModels directly with the configured endpoint (the *sdkprovider.Provider),
+	// as the SDK's Refresh hook does. This tests the error-message rewriting
+	// without going through ListModels' fallback, which suppresses listing errors.
+	_, err := zenModels(context.Background(), p.endpoint)
+	if err == nil {
+		t.Fatal("expected an error from the free-tier 403, got nil")
+	}
+	msg := err.Error()
+	// The rewritten message must mention the key is valid and explain the restriction.
+	if !strings.Contains(msg, "API key is valid") {
+		t.Errorf("error message does not mention key validity: %v", msg)
+	}
+	// The FreeTierError marker must survive for downstream isZenFreeTierError calls.
+	if !strings.Contains(msg, "FreeTierError") {
+		t.Errorf("error message drops the FreeTierError marker needed for downstream classification: %v", msg)
+	}
+	// It must not be classified as KindAuth.
+	var aiErr *ai.Error
+	if errors.As(err, &aiErr) && aiErr.Kind == ai.KindAuth {
+		t.Errorf("free-tier 403 classified as KindAuth, want KindInvalidRequest")
 	}
 }
 

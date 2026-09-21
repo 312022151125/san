@@ -6,12 +6,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/genai-io/sdk-go/pkg/ai"
 	sdkprovider "github.com/genai-io/sdk-go/pkg/ai/provider"
 )
+
+// zenFreeTierGatePattern matches the two forms OpenCode's gateway uses to
+// signal a free-tier identity denial. The API key is valid — paid models on
+// the same key keep serving — so the error is client policy, not a bad
+// credential, and must not be classified as KindAuth.
+var zenFreeTierGatePattern = regexp.MustCompile(`(?i)free tier can only be used from within|\bFreeTierError\b`)
+
+// isZenFreeTierError reports whether the response body string from a Zen 403
+// is the free-tier gate denial rather than a genuine credential failure.
+func isZenFreeTierError(body string) bool {
+	return zenFreeTierGatePattern.MatchString(body)
+}
 
 // The ChatGPT subscription backend publishes its lineup at its own catalog
 // endpoint rather than through the Responses protocol's model listing: the
@@ -172,11 +185,20 @@ func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error)
 		return nil, err
 	}
 	if res.StatusCode >= 400 {
+		bodyStr := string(body)
+		kind := zenErrorKind(res.StatusCode, bodyStr)
+		msg := "the OpenCode Zen catalog declined: " + bodyStr
+		if res.StatusCode == http.StatusForbidden && isZenFreeTierError(bodyStr) {
+			msg = "OpenCode rejected this request with 403 FreeTierError: its free tier can " +
+				"only be used from within OpenCode. Your API key is valid — paid models on " +
+				"the same key keep working. Pick a paid model with /model; if this model is " +
+				"expected to work in San, the gateway's gate has likely changed and should be reported."
+		}
 		return nil, &ai.Error{
 			Driver:  "openai-chat",
-			Kind:    zenErrorKind(res.StatusCode),
+			Kind:    kind,
 			Status:  res.StatusCode,
-			Message: "the OpenCode Zen catalog declined: " + string(body),
+			Message: msg,
 		}
 	}
 
@@ -244,9 +266,19 @@ func zenAPIForModel(id string) ai.API {
 	}
 }
 
-func zenErrorKind(status int) ai.ErrorKind {
+// zenErrorKind classifies a Zen gateway error. A 403 carrying the free-tier
+// gate body is client policy (wrong identity), not a credential failure: the
+// same key keeps serving paid SKUs, so KindAuth — which reads as "bad key" —
+// is incorrect and would mislead the user. Every other 403 is a true auth
+// denial.
+func zenErrorKind(status int, body string) ai.ErrorKind {
 	switch {
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+	case status == http.StatusUnauthorized:
+		return ai.KindAuth
+	case status == http.StatusForbidden:
+		if isZenFreeTierError(body) {
+			return ai.KindInvalidRequest
+		}
 		return ai.KindAuth
 	case status == http.StatusTooManyRequests:
 		return ai.KindRateLimit
