@@ -17,20 +17,21 @@ import (
 type ProviderID string
 
 const (
-	AgnesAI    ProviderID = "agnesai"
-	Anthropic  ProviderID = "anthropic"
-	OpenAI     ProviderID = "openai"
-	Copilot    ProviderID = "copilot"
-	Google     ProviderID = "google"
-	Moonshot   ProviderID = "moonshot"
-	Alibaba    ProviderID = "alibaba"
-	MinMax     ProviderID = "minmax"
-	BigModel   ProviderID = "bigmodel"
-	DeepSeek   ProviderID = "deepseek"
-	SenseNova  ProviderID = "sensenova"
-	Ollama     ProviderID = "ollama"
-	Mimo       ProviderID = "mimo"
-	Volcengine ProviderID = "volcengine"
+	AgnesAI     ProviderID = "agnesai"
+	Anthropic   ProviderID = "anthropic"
+	OpenAI      ProviderID = "openai"
+	Copilot     ProviderID = "copilot"
+	Google      ProviderID = "google"
+	Moonshot    ProviderID = "moonshot"
+	Alibaba     ProviderID = "alibaba"
+	MinMax      ProviderID = "minmax"
+	BigModel    ProviderID = "bigmodel"
+	DeepSeek    ProviderID = "deepseek"
+	SenseNova   ProviderID = "sensenova"
+	Ollama      ProviderID = "ollama"
+	Mimo        ProviderID = "mimo"
+	Volcengine  ProviderID = "volcengine"
+	OpenCodeZen ProviderID = "opencode-zen"
 )
 
 // AuthMethod is how a provider is reached. The same models can be served

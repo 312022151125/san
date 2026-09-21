@@ -31,6 +31,8 @@ func DefaultModel(providerName string, authMethod string) string {
 		return "MiniMax-M2.7"
 	case "bigmodel":
 		return "glm-5.1"
+	case "opencode-zen":
+		return "glm-5.1"
 	case "deepseek":
 		return "deepseek-v4-flash"
 	case "sensenova":

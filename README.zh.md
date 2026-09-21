@@ -154,6 +154,7 @@ san --resume                 # 选择历史会话恢复
 | **Volcengine**（Ark） | `VOLCENGINE_API_KEY` |
 | **Ollama** (本地) | `OLLAMA_BASE_URL`（默认 `http://localhost:11434/v1`） |
 | **Agnes-AI** | `AGNESAI_API_KEY` |
+| **OpenCode Zen** | `OPENCODE_ZEN_API_KEY` |
 | **Exa** 搜索 | _无需_（默认） |
 | **Tavily** 搜索 | `TAVILY_API_KEY` |
 | **Brave** 搜索 | `BRAVE_API_KEY` |

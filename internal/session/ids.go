@@ -2,6 +2,8 @@ package session
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 )
 
@@ -15,4 +17,20 @@ func generateSessionID() string {
 
 func NewSessionID() string {
 	return generateSessionID()
+}
+
+// GenerateTestSessionID returns a deterministic synthetic session ID for
+// test/debug use. Production uses NewSessionID.
+// ponytail: test/debug-only synthetic IDs; production uses NewSessionID.
+// Ceiling: 26-char ses_ shape only — upstream's 64-hex promptCacheKey strip
+// does not apply.
+func GenerateTestSessionID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	hexPart := hex.EncodeToString(sum[0:6]) // 12 hex chars
+	const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	tail := make([]byte, 14)
+	for i := range tail {
+		tail[i] = chars[sum[6+i]%62] // first 14 of sum[6:22]; 6+14=20 <= 32, in bounds
+	}
+	return "ses_" + hexPart + string(tail)
 }

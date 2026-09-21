@@ -54,6 +54,7 @@ var vendorDisplays = map[ProviderID]ProviderDisplay{
 	Mimo:           {Name: "Xiaomi MiMo", Order: 110},
 	Volcengine:     {Name: "Volcengine Ark", Order: 120},
 	AgnesAI:        {Name: "Agnes-AI", Order: 130},
+	OpenCodeZen:    {Name: "OpenCode Zen", Order: 135},
 	CustomProvider: {Name: "Custom", Order: 140},
 }
 
@@ -149,6 +150,11 @@ var vendorEntries = []vendorEntry{
 		vendorID: "agnesai",
 	},
 	{
+		meta: Meta{Provider: OpenCodeZen, AuthMethod: AuthAPIKey,
+			EnvVars: []string{"OPENCODE_ZEN_API_KEY"}, DisplayName: "API Key"},
+		configure: configureZen,
+	},
+	{
 		meta:      Meta{Provider: CustomProvider, AuthMethod: AuthAPIKey, EnvVars: []string{CustomAPIKeyEnvVar}, DisplayName: "Direct API"},
 		configure: configureCustom,
 	},
@@ -194,6 +200,9 @@ func (e vendorEntry) factory() Factory {
 // that exists in no catalog — reaches the same code path as every other.
 func (e vendorEntry) resolveVendor() (catalog.Vendor, error) {
 	if e.vendorID == "" {
+		if e.meta.Provider == OpenCodeZen {
+			return zenVendor(), nil
+		}
 		return customVendor()
 	}
 	vendor, ok := catalog.Find(e.vendorID)
@@ -269,6 +278,55 @@ func configureVolcengine(vendor catalog.Vendor, cfg *sdkprovider.Config) error {
 	// Through the vendor, so the window is read out of the model ID the way it
 	// is for every other Ark model.
 	cfg.Models = []ai.Model{vendor.Model(modelID)}
+	return nil
+}
+
+// zenBaseURL is the OpenCode Zen gateway root. The driver appends the
+// protocol path itself, so this stays the root rather than a full endpoint.
+const zenBaseURL = "https://opencode.ai/zen/v1"
+
+// zenUserAgent identifies San's turns the way OpenCode's own CLI does.
+// ponytail: hard-coded to OpenCode 2.0.3; ceiling is one UA string for all
+// models. Per-family UAs or a version bump = one-line const change.
+const zenUserAgent = "opencode/latest/2.0.3/cli" // [INFERENCE] channel/name unconfirmed
+
+// zenModel is the one chat/completions-family model this row serves. Switching
+// models later is a one-line const change.
+const zenModel = "glm-5.1"
+
+// zenVendor builds the catalog row for OpenCode Zen. It exists in no catalog,
+// so San supplies what a vendor entry would have said: the protocol, the host,
+// and the one hard-coded model.
+// ponytail: inline row, no catalog entry exists.
+func zenVendor() catalog.Vendor {
+	return catalog.Vendor{
+		ID:          string(OpenCodeZen),
+		DisplayName: "OpenCode Zen",
+		API:         ai.APIOpenAIChat,
+		BaseURL:     zenBaseURL,
+		KeyEnv:      []string{"OPENCODE_ZEN_API_KEY"},
+		Input:       []ai.Modality{ai.ModalityText, ai.ModalityImage},
+		Compat:      ai.OpenAIChatCompat{},
+		Models:      []ai.Model{{ID: zenModel, Name: zenModel}},
+	}
+}
+
+// zenModels serves the hard-coded model without hitting the network. Zen does
+// publish /v1/models, but its families span four wire shapes and this row
+// speaks one, so a live listing would surface models this driver cannot run.
+func zenModels(context.Context, *sdkprovider.Provider) ([]ai.Model, error) {
+	return []ai.Model{{ID: zenModel, Name: zenModel}}, nil
+}
+
+// configureZen points the endpoint at Zen, stamped as OpenCode's own CLI.
+// The credential stays the driver's business: it sends cfg.APIKey as
+// Authorization: Bearer, so nothing here sets that header by hand.
+func configureZen(_ catalog.Vendor, cfg *sdkprovider.Config) error {
+	if cfg.BaseURL = secret.Resolve("OPENCODE_ZEN_BASE_URL"); cfg.BaseURL == "" {
+		cfg.BaseURL = zenBaseURL // hard-coded default; env only overrides (tests/escape hatch)
+	} // mirrors configureBigModelCoding precedent
+	cfg.Headers = map[string]string{"User-Agent": zenUserAgent}
+	cfg.Fetch = zenModels
 	return nil
 }
 
