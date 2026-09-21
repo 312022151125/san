@@ -63,6 +63,9 @@ func TestZenTurnSendsIdentityAndSurfacesErrors(t *testing.T) {
 	if got := e.headers.Get("User-Agent"); got != zenUserAgent {
 		t.Errorf("User-Agent = %q, want %q", got, zenUserAgent)
 	}
+	if got := e.headers.Get("x-opencode-client"); got != "cli" {
+		t.Errorf("x-opencode-client = %q, want \"cli\"", got)
+	}
 	if got := e.headers.Get("x-opencode-session"); !sessionIDPattern.MatchString(got) {
 		t.Errorf("x-opencode-session = %q, want ses_<12 hex><14 alphanum>", got)
 	}

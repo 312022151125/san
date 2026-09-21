@@ -351,16 +351,28 @@ func zenVendor() catalog.Vendor {
 		Input:       []ai.Modality{ai.ModalityText, ai.ModalityImage},
 		Compat:      ai.OpenAIChatCompat{},
 		Models:      []ai.Model{{ID: zenModel, Name: zenModel, API: ai.APIOpenAIChat}},
-		// Infer runs after decorate() stamps API=vendor.API, so it can
-		// override to the correct per-family protocol without changing the
-		// vendor default that the fallback model inherits.
-		Infer: func(m ai.Model) ai.Model {
-			if api := zenAPIForModel(m.ID); api != "" {
-				m.API = api
-			}
-			return m
-		},
+		// Infer runs after decorate() stamps both API and Compat from the
+		// vendor defaults. It overrides both to the correct per-family values
+		// so checkCompat() never sees a mismatch during inference validation.
+		Infer: zenInfer,
 	}
+}
+
+// zenInfer maps a model's ID to the correct wire protocol and its matching
+// compat type. It runs inside catalog.Vendor.decorate() after the vendor-level
+// defaults are stamped, so it is the authoritative source for per-model routing.
+func zenInfer(m ai.Model) ai.Model {
+	switch zenAPIForModel(m.ID) {
+	case ai.APIOpenAIResponses:
+		m.API = ai.APIOpenAIResponses
+		m.Compat = ai.OpenAIResponsesCompat{}
+	case ai.APIAnthropicMessages:
+		m.API = ai.APIAnthropicMessages
+		m.Compat = ai.AnthropicCompat{}
+	case ai.APIOpenAIChat:
+		// already correct from vendor defaults; nothing to do
+	}
+	return m
 }
 
 // configureZen points the endpoint at Zen, stamped as OpenCode's own CLI.
@@ -372,6 +384,7 @@ func configureZen(_ catalog.Vendor, cfg *sdkprovider.Config) error {
 	} // mirrors configureBigModelCoding precedent
 	cfg.Headers = map[string]string{
 		"User-Agent":         zenUserAgent,
+		"x-opencode-client":  "cli",
 		"x-opencode-session": zenProcessSessionID(),
 	}
 	cfg.Fetch = zenModels
