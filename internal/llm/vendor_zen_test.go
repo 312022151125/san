@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/san/internal/core"
 )
 
@@ -75,10 +75,42 @@ func TestZenTurnSendsIdentityAndSurfacesErrors(t *testing.T) {
 	}
 }
 
-func TestZenListModelsFiltersChatCompletions(t *testing.T) {
-	var seenHeaders http.Header
+// ponytail: old chat-only filter removed by multi-protocol contract —
+// TestZenListModelsFiltersChatCompletions asserted the single-protocol
+// behavior (keep only glm-/deepseek-/etc, drop gpt-/claude-/gemini-).
+// Replaced by TestZenListModelsKeepsAllFamilies below.
+func TestZenAPIForModelFamily(t *testing.T) {
+	cases := []struct {
+		id   string
+		want ai.API
+	}{
+		{"gpt-5.5", ai.APIOpenAIResponses},
+		{"gpt-5.5-mini", ai.APIOpenAIResponses},
+		{"grok-4.5", ai.APIOpenAIResponses},
+		{"muse-spark-1.3", ai.APIOpenAIResponses},
+		{"muse-spark-1.3-contributor", ai.APIOpenAIResponses},
+		{"claude-sonnet-5", ai.APIAnthropicMessages},
+		{"claude-opus-4", ai.APIAnthropicMessages},
+		{"qwen3.7-plus", ai.APIAnthropicMessages},
+		{"qwen3.7-max", ai.APIAnthropicMessages},
+		{"glm-5.1", ai.APIOpenAIChat},
+		{"deepseek-v4-pro", ai.APIOpenAIChat},
+		{"kimi-k2.5", ai.APIOpenAIChat},
+		{"minimax-m3", ai.APIOpenAIChat},
+		{"big-pickle", ai.APIOpenAIChat},
+		{"gemini-3-flash", ai.APIGoogleGenAI},
+		{"gemini-3-pro", ai.APIGoogleGenAI},
+		{"jev-1.13", ai.API("")},
+	}
+	for _, tc := range cases {
+		if got := zenAPIForModel(tc.id); got != tc.want {
+			t.Errorf("zenAPIForModel(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
+func TestZenListModelsKeepsAllFamilies(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenHeaders = r.Header.Clone()
 		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
 			return
@@ -87,19 +119,16 @@ func TestZenListModelsFiltersChatCompletions(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{
 			"object": "list",
 			"data": [
-				{"id": "claude-sonnet-4"},
-				{"id": "gemini-3.8-flash"},
 				{"id": "gpt-5.5"},
-				{"id": "qwen3.8-flash"},
-				{"id": "jev-1.13"},
-				{"id": "deepseek-v4.1-flash"},
+				{"id": "muse-spark-1.3"},
+				{"id": "grok-4.5"},
+				{"id": "claude-sonnet-5"},
+				{"id": "qwen3.7-plus"},
 				{"id": "glm-5.1"},
-				{"id": "minimax-m3"},
-				{"id": "kimi-k3"},
-				{"id": "big-pickle"},
-				{"id": "mimo-v2.5-free"},
-				{"id": "ling-3.0-flash-fin-free"},
-				{"id": "nemotron-3-ultra-free"}
+				{"id": "deepseek-v4-pro"},
+				{"id": "kimi-k2.5"},
+				{"id": "gemini-3-flash"},
+				{"id": "jev-1.13"}
 			]
 		}`)
 	}))
@@ -111,29 +140,29 @@ func TestZenListModelsFiltersChatCompletions(t *testing.T) {
 		t.Fatalf("ListModels: %v", err)
 	}
 
-	if got := seenHeaders.Get("Authorization"); got != "Bearer zen-test-key" {
-		t.Errorf("Authorization = %q, want Bearer zen-test-key", got)
+	want := map[string]ai.API{
+		"gpt-5.5":        ai.APIOpenAIResponses,
+		"muse-spark-1.3": ai.APIOpenAIResponses,
+		"grok-4.5":       ai.APIOpenAIResponses,
+		"claude-sonnet-5": ai.APIAnthropicMessages,
+		"qwen3.7-plus":   ai.APIAnthropicMessages,
+		"glm-5.1":        ai.APIOpenAIChat,
+		"deepseek-v4-pro": ai.APIOpenAIChat,
+		"kimi-k2.5":      ai.APIOpenAIChat,
+		"gemini-3-flash": ai.APIGoogleGenAI,
 	}
-	if got := seenHeaders.Get("User-Agent"); got != zenUserAgent {
-		t.Errorf("User-Agent = %q, want %q", got, zenUserAgent)
+	if len(models) != len(want) {
+		t.Fatalf("got %d models %v, want %d", len(models), models, len(want))
 	}
-
-	gotIDs := make([]string, len(models))
-	for i, m := range models {
-		gotIDs[i] = m.ID
-	}
-	wantIDs := []string{
-		"glm-5.1",
-		"deepseek-v4.1-flash",
-		"minimax-m3",
-		"kimi-k3",
-		"big-pickle",
-		"mimo-v2.5-free",
-		"ling-3.0-flash-fin-free",
-		"nemotron-3-ultra-free",
-	}
-	if !slices.Equal(gotIDs, wantIDs) {
-		t.Errorf("got models %v, want %v", gotIDs, wantIDs)
+	for _, m := range models {
+		w, ok := want[m.ID]
+		if !ok {
+			t.Errorf("unexpected model %q (unknown IDs must be skipped)", m.ID)
+			continue
+		}
+		if m.API != w {
+			t.Errorf("model %q API = %q, want %q", m.ID, m.API, w)
+		}
 	}
 }
 

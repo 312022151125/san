@@ -133,10 +133,13 @@ func codexErrorKind(status int) ai.ErrorKind {
 
 const zenListTimeout = 8 * time.Second
 
-// zenModels fetches the live model listing from OpenCode Zen and filters
-// for models supported by the OpenAI chat completions driver.
+// zenModels fetches the live model listing from OpenCode Zen and tags each
+// entry with the protocol its family speaks. Entries from no known family
+// are skipped, never defaulted to chat.
+// ponytail: probe ID "-" borrows vendor-level URL/auth like codexModels; the
+// model ID is irrelevant to ConfigFor here, so no zenModel dependency.
 func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error) {
-	cfg := p.ConfigFor(ai.Model{ID: zenModel, API: ai.APIOpenAIChat})
+	cfg := p.ConfigFor(ai.Model{ID: "-", API: ai.APIOpenAIChat})
 	client := cfg.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
@@ -188,41 +191,59 @@ func zenModels(ctx context.Context, p *sdkprovider.Provider) ([]ai.Model, error)
 
 	models := make([]ai.Model, 0, len(listing.Data))
 	for _, m := range listing.Data {
-		if m.ID == "" || !isZenChatCompletionModel(m.ID) {
+		api := zenAPIForModel(m.ID)
+		if m.ID == "" || api == "" {
 			continue
 		}
 		models = append(models, ai.Model{
 			ID:   m.ID,
 			Name: m.ID,
-			API:  ai.APIOpenAIChat,
+			API:  api,
 		})
 	}
 	if len(models) == 0 {
+		// ponytail: one chat seed keeps the picker non-empty offline; ceiling
+		// is single-family fallback. Per-family seeds when picker needs them.
 		return []ai.Model{{ID: zenModel, Name: zenModel, API: ai.APIOpenAIChat}}, nil
 	}
 	return models, nil
 }
 
-// isZenChatCompletionModel reports whether a model from OpenCode Zen uses the
-// OpenAI-compatible /chat/completions endpoint. Other families (Claude, GPT,
-// Grok, Muse, Gemini, Qwen, Jev) use different protocols (/messages, /responses,
-// /models, /systemone) that this driver cannot run.
-func isZenChatCompletionModel(id string) bool {
+// zenAPIForModel maps a Zen model ID to its wire protocol by family prefix,
+// case-insensitive. Family prefixes win over the "-free" tier suffix, so a
+// free variant still speaks its family's protocol. Unknown families return ""
+// so callers skip the entry instead of guessing chat.
+func zenAPIForModel(id string) ai.API {
 	lower := strings.ToLower(id)
 	switch {
+	case strings.HasPrefix(lower, "gpt-"),
+		strings.HasPrefix(lower, "grok-"),
+		strings.HasPrefix(lower, "muse-spark-"):
+		return ai.APIOpenAIResponses
+	case strings.HasPrefix(lower, "claude-"),
+		strings.HasPrefix(lower, "qwen"):
+		return ai.APIAnthropicMessages
+	case strings.HasPrefix(lower, "gemini-"):
+		return ai.APIGoogleGenAI
 	case strings.HasPrefix(lower, "deepseek-"),
-		strings.HasPrefix(lower, "glm-"),
 		strings.HasPrefix(lower, "minimax-"),
+		strings.HasPrefix(lower, "glm-"),
 		strings.HasPrefix(lower, "kimi-"),
 		strings.HasPrefix(lower, "mimo-"),
 		strings.HasPrefix(lower, "ling-"),
 		strings.HasPrefix(lower, "nemotron-"),
-		strings.HasSuffix(lower, "free"),
 		lower == "big-pickle":
-		return true
+		return ai.APIOpenAIChat
 	default:
-		return false
+		return ""
 	}
+}
+
+// isZenChatCompletionModel reports whether a Zen model speaks OpenAI chat
+// completions. Wrapper over the classifier; the filter loop uses the
+// classifier directly to keep the entry's own API.
+func isZenChatCompletionModel(id string) bool {
+	return zenAPIForModel(id) == ai.APIOpenAIChat
 }
 
 func zenErrorKind(status int) ai.ErrorKind {
