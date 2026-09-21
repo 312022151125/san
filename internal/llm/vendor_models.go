@@ -217,6 +217,7 @@ func isZenChatCompletionModel(id string) bool {
 		strings.HasPrefix(lower, "mimo-"),
 		strings.HasPrefix(lower, "ling-"),
 		strings.HasPrefix(lower, "nemotron-"),
+		strings.HasSuffix(lower, "free"),
 		lower == "big-pickle":
 		return true
 	default:
