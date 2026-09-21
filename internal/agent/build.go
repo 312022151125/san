@@ -166,6 +166,7 @@ func buildAgent(p BuildParams) (core.Agent, *PermissionGate, error) {
 		Client:       client.TurnClient,
 		CallOptions:  client.CallOptions,
 		InputLimit:   client.InputLimit,
+		ToolPadder:   llm.ZenToolPadderFor(p.Provider),
 		System:       sys,
 		Tools:        tools,
 		Gate:         tool.HookedPermission(p.HookEngine, pg),

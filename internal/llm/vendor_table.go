@@ -391,6 +391,54 @@ func configureZen(_ catalog.Vendor, cfg *sdkprovider.Config) error {
 	return nil
 }
 
+// ZenToolPadderFor returns ZenToolPadder when the provider is OpenCode Zen,
+// and nil otherwise. Callers pass the result directly to core.Config.ToolPadder.
+func ZenToolPadderFor(p Provider) func([]ai.Tool) []ai.Tool {
+	if p == nil {
+		return nil
+	}
+	provider, _ := parseProviderKey(p.Name())
+	if provider == OpenCodeZen {
+		return ZenToolPadder
+	}
+	return nil
+}
+
+// zenGateToolNames are the five core tool names OpenCode's gateway requires in
+// every request body. The gate checks names only — schemas are ignored — so
+// stubs carry empty descriptions and the minimal schema.
+var zenGateToolNames = []string{"bash", "edit", "glob", "grep", "read"}
+
+// ZenToolPadder pads the tool list with wire-inert stubs for any gate-required
+// names that are not already present. It satisfies core.Config.ToolPadder.
+// Stubs never enter the caller's tool registry — they are body-gate filler only.
+//
+// The gateway's body-gate requires ≥5 of the core names in tools[]; normal
+// agent turns that already carry all five pass through unchanged (same slice).
+func ZenToolPadder(tools []ai.Tool) []ai.Tool {
+	present := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		present[t.Schema.Name] = true
+	}
+	missing := make([]string, 0, len(zenGateToolNames))
+	for _, name := range zenGateToolNames {
+		if !present[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return tools // already satisfies the gate; return same slice
+	}
+	padded := make([]ai.Tool, len(tools), len(tools)+len(missing))
+	copy(padded, tools)
+	for _, name := range missing {
+		// Stub: name only, empty description, minimal schema. The gate checks
+		// names and ignores schemas, so this is all that is needed on the wire.
+		padded = append(padded, ai.Tool{Schema: ai.Schema{Name: name}})
+	}
+	return padded
+}
+
 // customVendor builds a catalog row for the OpenAI-compatible endpoint the
 // user configured in the app. It exists in no catalog, so San supplies what a
 // vendor entry would have said: the protocol, the host, and nothing else.

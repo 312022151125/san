@@ -20,10 +20,36 @@ import (
 // credential, and must not be classified as KindAuth.
 var zenFreeTierGatePattern = regexp.MustCompile(`(?i)free tier can only be used from within|\bFreeTierError\b`)
 
-// isZenFreeTierError reports whether the response body string from a Zen 403
-// is the free-tier gate denial rather than a genuine credential failure.
+// isZenFreeTierError reports whether a string from a Zen 403 body is the
+// free-tier gate denial rather than a genuine credential failure.
 func isZenFreeTierError(body string) bool {
 	return zenFreeTierGatePattern.MatchString(body)
+}
+
+// IsZenFreeTierError reports whether err is an OpenCode Zen/Go free-tier gate
+// denial. The denial arrives as a 403 whose message contains "FreeTierError"
+// or "free tier can only be used from within". It is client policy (wrong
+// identity), not a revoked credential: the same key keeps serving paid SKUs.
+func IsZenFreeTierError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return isZenFreeTierError(err.Error())
+}
+
+// zenFreeTierMessage is the user-facing explanation for a free-tier gate denial.
+const zenFreeTierMessage = "OpenCode rejected this model with 403 FreeTierError: " +
+	"its free tier can only be used from within OpenCode. " +
+	"Your API key is valid — paid models on the same key keep working. " +
+	"Pick a paid model with /model."
+
+// RewriteZenInferenceError rewrites a free-tier gate denial into a clear
+// explanation. All other errors are returned unchanged.
+func RewriteZenInferenceError(err error) error {
+	if !IsZenFreeTierError(err) {
+		return err
+	}
+	return fmt.Errorf("%s", zenFreeTierMessage)
 }
 
 // The ChatGPT subscription backend publishes its lineup at its own catalog

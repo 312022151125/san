@@ -178,6 +178,57 @@ func TestZenFreeTierErrorMessageIsHelpful(t *testing.T) {
 	}
 }
 
+func TestZenToolPadder(t *testing.T) {
+	// Empty input → all five gate names padded in.
+	padded := ZenToolPadder(nil)
+	got := make(map[string]bool, len(padded))
+	for _, tool := range padded {
+		got[tool.Schema.Name] = true
+	}
+	for _, name := range zenGateToolNames {
+		if !got[name] {
+			t.Errorf("ZenToolPadder(nil) missing gate name %q", name)
+		}
+	}
+
+	// Already-complete roster → same length, all names present.
+	full := make([]ai.Tool, len(zenGateToolNames))
+	for i, name := range zenGateToolNames {
+		full[i] = ai.Tool{Schema: ai.Schema{Name: name}}
+	}
+	result := ZenToolPadder(full)
+	if len(result) != len(full) {
+		t.Errorf("ZenToolPadder(full) len = %d, want %d", len(result), len(full))
+	}
+
+	// Partial roster → padded to include all five.
+	partial := []ai.Tool{{Schema: ai.Schema{Name: "read"}}}
+	padded2 := ZenToolPadder(partial)
+	got2 := make(map[string]bool, len(padded2))
+	for _, tool := range padded2 {
+		got2[tool.Schema.Name] = true
+	}
+	for _, name := range zenGateToolNames {
+		if !got2[name] {
+			t.Errorf("ZenToolPadder(partial) missing gate name %q", name)
+		}
+	}
+	// Original slice must not be mutated.
+	if len(partial) != 1 {
+		t.Error("ZenToolPadder mutated the caller's slice")
+	}
+}
+
+func TestZenToolPadderFor(t *testing.T) {
+	p := openZen(t, "http://localhost:1") // URL irrelevant; only checks provider identity
+	if ZenToolPadderFor(p) == nil {
+		t.Error("ZenToolPadderFor(zen provider) = nil, want non-nil")
+	}
+	if ZenToolPadderFor(nil) != nil {
+		t.Error("ZenToolPadderFor(nil) should return nil")
+	}
+}
+
 func TestZenNewSessionID(t *testing.T) {
 	id := zenNewSessionID()
 	if !sessionIDPattern.MatchString(id) {

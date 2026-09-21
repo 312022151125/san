@@ -182,7 +182,11 @@ func (m *model) OnAgentStop(err error) tea.Cmd {
 	// shutdown, not an agent failure the user needs to see.
 	failed := err != nil && !errors.Is(err, context.Canceled)
 	if failed {
-		m.conv.AddNotice(fmt.Sprintf("Agent error: %v", err))
+		// Rewrite provider-specific errors into clear user-facing explanations
+		// before surfacing them. The original error is kept for hook/recovery
+		// paths that may inspect its type.
+		displayErr := llm.RewriteZenInferenceError(err)
+		m.conv.AddNotice(fmt.Sprintf("Agent error: %v", displayErr))
 		m.fireStopFailureHook(core.LastAssistantChatContent(m.conv.Messages), err)
 	}
 	m.conv.AgentToUI.DrainPendingQuestions()

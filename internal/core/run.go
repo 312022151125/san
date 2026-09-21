@@ -34,6 +34,7 @@ type agent struct {
 	resultFilter ResultFilter
 	client       func(msgs []Message) (*ai.Client, error)
 	callOptions  func() []ai.Option
+	toolPadder   func([]ai.Tool) []ai.Tool
 	inputLimit   func() int
 	inbox        chan Inbound
 	outbox       chan Event
@@ -464,6 +465,9 @@ func (a *agent) preInfer(_ context.Context, inf *sdkagent.Inference) error {
 	}
 	if a.callOptions != nil {
 		inf.Options = append(inf.Options, a.callOptions()...)
+	}
+	if a.toolPadder != nil {
+		inf.Tools = a.toolPadder(inf.Tools)
 	}
 	return nil
 }

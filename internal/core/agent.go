@@ -140,6 +140,11 @@ type Config struct {
 	// asked for fresh each inference, so a change mid-session lands on the next
 	// call. Nil leaves the model's defaults.
 	CallOptions func() []ai.Option
+	// ToolPadder, when non-nil, is called in PreInfer with the tool list the
+	// agent is about to send. It may return a longer slice with stub entries
+	// appended; it must not mutate the input slice. Nil means no padding.
+	// Used by OpenCode Zen to satisfy the gateway's body-gate requirement.
+	ToolPadder func(tools []ai.Tool) []ai.Tool
 	// InputLimit is the prompt budget auto-compaction measures against. Nil or
 	// zero turns it off. Not read off the client: the window is the model's
 	// unless a setting overrides it, and the setting is the application's.
@@ -227,6 +232,7 @@ func NewAgent(cfg Config) Agent {
 		resultFilter: cfg.ResultFilter,
 		client:       cfg.Client,
 		callOptions:  cfg.CallOptions,
+		toolPadder:   cfg.ToolPadder,
 		inputLimit:   cfg.InputLimit,
 		inbox:        make(chan Inbound, cfg.InboxBuf),
 		outbox:       outbox,
