@@ -31,6 +31,7 @@ import (
 	"github.com/genai-io/san/internal/setting"
 	"github.com/genai-io/san/internal/subagent"
 	"github.com/genai-io/san/internal/tool"
+	toolmemory "github.com/genai-io/san/internal/tool/memory"
 	"github.com/genai-io/san/internal/tool/perm"
 )
 
@@ -108,10 +109,21 @@ func (m *model) promptParams() agent.BuildParams {
 		DisabledTools:  m.services.Setting.DisabledTools(),
 		MCPTools:       mcp.AsCoreTools(m.services.MCP.GetToolSchemas(), mcp.NewCaller(m.services.MCP)),
 
-		// Inject the Evolve trigger tool (tailored to the enabled capabilities)
-		// so the model can queue its own self-learning reviews.
-		ExtraTools: m.selfLearnExtraTools(),
+		// Conditional tools: the Evolve trigger (tailored to the enabled
+		// self-learning capabilities) and — only when memory.backend =
+		// hindsight — retain/recall/reflect. Each source returns nil when
+		// its feature is off, so the toolset costs nothing otherwise.
+		ExtraTools: m.extraTools(),
 	}
+}
+
+// extraTools concatenates every conditional tool schema the main agent may
+// present this turn. Each source gates itself and returns nil when its
+// feature is off.
+func (m *model) extraTools() []core.ToolSchema {
+	extras := m.selfLearnExtraTools()
+	extras = append(extras, toolmemory.Schemas()...)
+	return extras
 }
 
 // syncMCPTools replaces the mcp__* tools in the running agent's registry with

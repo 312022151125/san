@@ -29,8 +29,8 @@ func (m *model) handleSubmit() tea.Cmd {
 		return nil
 	}
 
-	if m.conv.Stream.Active {
-		log.QueueLog("handleSubmit: stream active, enqueue %q", raw)
+	if m.conv.Stream.Active || m.autoRecallInFlight {
+		log.QueueLog("handleSubmit: stream active or recall pending, enqueue %q", raw)
 		return m.enqueueWhileStreaming(raw)
 	}
 
@@ -125,7 +125,10 @@ func (m *model) dispatchSubmission(raw string) tea.Cmd {
 	m.userInput.Reset()
 	providerMsg := core.UserMessage(msg.Content, providerImages)
 	providerMsg.ID = msg.ID
-	return m.SubmitToAgent(providerMsg)
+	// Auto-recall gate (memory.backend = hindsight): recalls in the background
+	// before the turn starts and injects the results as background context;
+	// submits directly when memory is off or recall isn't due.
+	return m.maybeAutoRecallSubmit(providerMsg)
 }
 
 // runSlashCommandIfMatched returns (cmd, true) if `raw` is a slash command

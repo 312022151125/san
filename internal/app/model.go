@@ -105,6 +105,20 @@ type model struct {
 	// the mode indicator shows "thinking…" instead of a transcript notice.
 	autopilotDeciding bool
 
+	// autoRecallInFlight marks the once-per-task Hindsight auto-recall window:
+	// set when the pre-submit recall defers the turn, cleared when its result
+	// arrives. While set, handleSubmit parks further input in the queue (same
+	// as an active stream) so submissions cannot overtake the deferred one.
+	// UI-goroutine only — the recall tea.Cmd goroutine never touches it.
+	autoRecallInFlight bool
+
+	// autoRetainInFlight single-flights the opt-in background retain: one
+	// digest in flight at a time, cleared when its done-message arrives on
+	// the UI goroutine. lastRetainedDigest skips re-storing an unchanged
+	// digest (autopilot chains can end several turns identically).
+	autoRetainInFlight  bool
+	lastRetainedDigest  string
+
 	// updateInstalled / updateFailed record the background auto-update's
 	// outcome: the release now on disk (the status line asks for a restart),
 	// or the release that could not be installed (a warning at exit points to

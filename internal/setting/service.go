@@ -140,6 +140,39 @@ func (s *Settings) SetSearchProvider(provider string) {
 	}
 }
 
+// SearchURL returns the endpoint for URL-based search providers ("" when
+// unset). SearXNG falls back to SEARXNG_ENDPOINT when this is empty.
+func (s *Settings) SearchURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data == nil {
+		return ""
+	}
+	return s.data.SearchURL
+}
+
+// SearchMaxResults returns the global WebSearch result cap (0 = default).
+func (s *Settings) SearchMaxResults() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data == nil {
+		return 0
+	}
+	return s.data.SearchMaxResults
+}
+
+// Memory returns the memory backend config. The zero value (backend "off")
+// is returned when settings are not loaded, so callers can treat an
+// uninitialized service as "memory disabled".
+func (s *Settings) Memory() MemorySettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data == nil {
+		return MemorySettings{}
+	}
+	return s.data.Memory
+}
+
 func (s *Settings) StreamFirstChunkTimeout() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

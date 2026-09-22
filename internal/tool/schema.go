@@ -25,6 +25,13 @@ const (
 	ToolAskUserQuestion = "AskUserQuestion"
 
 	ToolEvolve = "Evolve"
+
+	// Hindsight memory tools. Registered always (init in tool/memory) but
+	// schema-gated: their schemas reach the model only through ExtraTools
+	// when memory.backend = hindsight.
+	ToolRecall  = "recall"
+	ToolRetain  = "retain"
+	ToolReflect = "reflect"
 )
 
 // IsAgentToolName reports whether the tool name represents an agent-like worker tool.
@@ -81,6 +88,9 @@ func GetToolSchemas() []core.ToolSchema {
 // decide whether they are otherwise active.
 var manageableExtraToolOrder = []string{
 	ToolEvolve,
+	ToolRecall,
+	ToolRetain,
+	ToolReflect,
 }
 
 // GetManageableToolSchemasWith returns every tool the /tools panel can manage.

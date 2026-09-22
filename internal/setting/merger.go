@@ -21,6 +21,8 @@ func mergeSettings(base, overlay *Data) *Data {
 	result.EnabledPlugins = mergeMaps(base.EnabledPlugins, overlay.EnabledPlugins)
 	result.DisabledTools = mergeMaps(base.DisabledTools, overlay.DisabledTools)
 	result.SearchProvider = coalesce(overlay.SearchProvider, base.SearchProvider)
+	result.SearchURL = coalesce(overlay.SearchURL, base.SearchURL)
+	result.SearchMaxResults = coalesceInt(overlay.SearchMaxResults, base.SearchMaxResults)
 	result.AllowBypass = coalesceBool(overlay.AllowBypass, base.AllowBypass)
 	result.ContextBar = coalesceBool(overlay.ContextBar, base.ContextBar)
 	result.Persona = coalesce(overlay.Persona, base.Persona)
@@ -28,6 +30,7 @@ func mergeSettings(base, overlay *Data) *Data {
 	result.AutoPilot = mergeAutoPilot(base.AutoPilot, overlay.AutoPilot)
 	result.Agents = mergeAgents(base.Agents, overlay.Agents)
 	result.Subagents = mergeSubagents(base.Subagents, overlay.Subagents)
+	result.Memory = mergeMemory(base.Memory, overlay.Memory)
 	result.LastOperationMode = coalesce(overlay.LastOperationMode, base.LastOperationMode)
 
 	return result
@@ -123,6 +126,22 @@ func mergeSelfLearn(base, overlay SelfLearnSettings) SelfLearnSettings {
 			DenyDelete: overlay.Skills.DenyDelete || base.Skills.DenyDelete,
 		},
 		Strategy: coalesce(overlay.Strategy, base.Strategy),
+	}
+}
+
+// mergeMemory does a field-level merge: strings coalesce (overlay's non-empty
+// wins), autoRecall's tri-state pointer coalesce (explicit value wins, else
+// base, else nil = default on), autoRetain ORs (enable-anywhere wins, matching
+// the safety bias of layered config), and maxResults coalesces. Without this
+// the entire memory block would be dropped on every Load and every save.
+func mergeMemory(base, overlay MemorySettings) MemorySettings {
+	return MemorySettings{
+		Backend:    coalesce(overlay.Backend, base.Backend),
+		URL:        coalesce(overlay.URL, base.URL),
+		Scope:      coalesce(overlay.Scope, base.Scope),
+		AutoRecall: coalesceBool(overlay.AutoRecall, base.AutoRecall),
+		AutoRetain: overlay.AutoRetain || base.AutoRetain,
+		MaxResults: coalesceInt(overlay.MaxResults, base.MaxResults),
 	}
 }
 

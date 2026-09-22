@@ -44,6 +44,10 @@ var readOnlyTools = map[string]bool{
 	"WebFetch":  true,
 	"WebSearch": true,
 	"LSP":       true,
+	// Hindsight memory reads: recall/reflect query the remote memory server
+	// and mutate nothing (workspace or bank).
+	"recall":  true,
+	"reflect": true,
 }
 
 // IsReadOnlyTool reports whether the tool only reads from the workspace
@@ -62,6 +66,11 @@ var safeTools = func() map[string]bool {
 		// Evolve only queues a background self-learning review — it writes
 		// nothing itself, so it auto-allows like the task/question tools.
 		"Evolve": true,
+		// retain writes durable facts to the remote memory server but
+		// mutates no workspace file; it is also parent-only (blocked for
+		// subagents regardless), so auto-allowing it only ever affects the
+		// main conversation, where memory writes are expected behavior.
+		"retain": true,
 	}
 	for name := range readOnlyTools {
 		m[name] = true

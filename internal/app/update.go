@@ -372,6 +372,16 @@ func (m *model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		log.Logger().Warn("failed to send message to agent", zap.Error(msg.err))
 		m.conv.AddNotice("Failed to send message: " + msg.err.Error())
 		return m, tea.Batch(m.CommitMessages()...)
+	case autoRecallSubmitMsg:
+		// Deferred pre-submit recall finished (or failed/timed out — the
+		// handler submits either way, injecting nothing on failure).
+		return m, m.handleAutoRecallSubmit(msg)
+	case autoRetainDoneMsg:
+		m.autoRetainInFlight = false
+		if msg.digest != "" {
+			m.lastRetainedDigest = msg.digest
+		}
+		return m, nil
 	case flushResultMsg:
 		return m, m.handleFlushResult(msg)
 	case scrollbackPrintReadyMsg:

@@ -18,6 +18,9 @@ import (
 // back the main plan it has no business reading.
 // Cron is parent-only for the same reason again: scheduling creates state
 // that outlives the worker and belongs to the session owner.
+// retain writes durable memory on behalf of the whole task; it lives on the
+// orchestration layer so parallel subagents cannot store duplicate
+// observations of the same work (memory writes are a parent concern).
 var parentOnlyTools = map[string]bool{
 	ToolAgent:      true,
 	ToolAgentStop:  true,
@@ -25,6 +28,7 @@ var parentOnlyTools = map[string]bool{
 	ToolTaskUpdate: true,
 	ToolTaskGet:    true,
 	ToolCron:       true,
+	ToolRetain:     true,
 }
 
 // IsParentOnlyTool reports whether the tool is reserved for the main
@@ -107,9 +111,10 @@ func (s *Set) agentAllTools() []core.ToolSchema {
 // agentTools returns tools filtered by the allow list.
 // Only tools in the Allow list are included (parent-only tools are excluded
 // even when listed). MCP tools matching the allow list (e.g.
-// "mcp__server__tool") are also included.
+// "mcp__server__tool") and caller-built ExtraTools (e.g. the memory tools,
+// when the backend is on) are also considered.
 func (s *Set) agentTools() []core.ToolSchema {
-	allTools := GetToolSchemas()
+	allTools := GetToolSchemasWith(SchemaOptions{ExtraTools: s.ExtraTools})
 
 	// Build allow set for fast lookup
 	allowSet := make(map[string]bool, len(s.Allow))

@@ -787,7 +787,7 @@ func TestSubagentToolSetOwnsFilterInputs(t *testing.T) {
 	allow := []string{tool.ToolRead}
 	disallow := []string{tool.ToolSendMessage}
 	disabled := map[string]bool{tool.ToolWrite: true}
-	set := newAgentToolSet(allow, disallow, disabled, nil)
+	set := newAgentToolSet(allow, disallow, disabled, nil, nil)
 
 	allow[0] = tool.ToolWrite
 	disallow[0] = tool.ToolRead
@@ -808,7 +808,7 @@ func TestSubagentToolSetInheritsDisabledTools(t *testing.T) {
 	const disabledName = tool.ToolSendMessage
 
 	disabled := map[string]bool{disabledName: true}
-	set := newAgentToolSet(nil, nil, disabled, nil)
+	set := newAgentToolSet(nil, nil, disabled, nil, nil)
 	// Mutating the caller's map after configuration must not alter the built set.
 	disabled[disabledName] = false
 
@@ -823,7 +823,7 @@ func TestSubagentToolSetInheritsDisabledTools(t *testing.T) {
 }
 
 func TestSubagentToolSetKeepsExplicitlyEnabledSendMessage(t *testing.T) {
-	set := newAgentToolSet(nil, nil, map[string]bool{tool.ToolSendMessage: false}, nil)
+	set := newAgentToolSet(nil, nil, map[string]bool{tool.ToolSendMessage: false}, nil, nil)
 	var found bool
 	for _, schema := range set.Tools() {
 		if schema.Name == tool.ToolSendMessage {

@@ -154,6 +154,17 @@ func (m *model) OnTurnEnd(result core.Result) tea.Cmd {
 		return tea.Batch(commitCmds...)
 	}
 
+	// Opt-in Hindsight auto-retain (memory.autoRetain): store a consolidated
+	// digest of this completed turn in the background. No-op when memory is
+	// off — one settings read, no goroutine, no HTTP. Placed before the queue
+	// drain so a drained-in next message doesn't skip retention of the turn
+	// that just finished; internal guards (single-flight, short answers,
+	// unchanged digest) decide whether there is anything to store.
+	if cmd := m.maybeAutoRetain(result); cmd != nil {
+		commitCmds = append(commitCmds, cmd)
+	}
+
+
 	if cmd, found := m.drainTurnQueues(); found {
 		log.QueueLog("OnTurnEnd: drained queued message, skipping hooks")
 		if cmd != nil {

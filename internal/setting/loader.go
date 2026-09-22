@@ -331,6 +331,30 @@ func UpdateSubagentsAt(cfg SubagentSettings, userLevel bool) error {
 	return updateSettingsFile(userLevel, func(d *Data) { d.Subagents = cfg })
 }
 
+// UpdateMemoryAt persists the memory backend config at the requested settings
+// level, rewriting only the memory block. Returns Validate's error verbatim if
+// the new config names an unknown backend or scope, so the caller can surface
+// it inline before touching disk.
+func UpdateMemoryAt(cfg MemorySettings, userLevel bool) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return updateSettingsFile(userLevel, func(d *Data) { d.Memory = cfg })
+}
+
+// UpdateSearchAt persists the URL-based search settings (searchUrl +
+// searchMaxResults) at the requested settings level, rewriting only those two
+// keys. The provider name keeps its own path (SetSearchProvider).
+func UpdateSearchAt(url string, maxResults int, userLevel bool) error {
+	if maxResults < 0 {
+		return fmt.Errorf("searchMaxResults must be ≥ 0 (got %d)", maxResults)
+	}
+	return updateSettingsFile(userLevel, func(d *Data) {
+		d.SearchURL = strings.TrimSpace(url)
+		d.SearchMaxResults = maxResults
+	})
+}
+
 // migrateAdvisorField moves a populated legacy top-level "advisor.model" value
 // into the new "agents" map and clears the old field. Called once per Load so
 // users who had the old key in settings.json don't lose their configuration.

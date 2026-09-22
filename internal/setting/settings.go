@@ -83,6 +83,111 @@ type Data struct {
 	// Example settings.json:
 	//   "subagents": { "maxConcurrency": 5, "maxWriters": 2 }
 	Subagents SubagentSettings `json:"subagents,omitempty"`
+
+	// Memory configures the optional long-term memory backend (Hindsight).
+	// The zero value is the disabled default: backend "off" means no client,
+	// no tools, no recall — zero runtime overhead.
+	//
+	// Example settings.json:
+	//   "memory": { "backend": "hindsight", "scope": "project" }
+	Memory MemorySettings `json:"memory"`
+
+	// SearchURL is the endpoint for URL-based search providers (currently
+	// SearXNG). Empty means "not configured"; the provider then falls back to
+	// SEARXNG_ENDPOINT. Only read when searchProvider selects such a provider.
+	SearchURL string `json:"searchUrl,omitempty"`
+
+	// SearchMaxResults caps WebSearch results globally. 0 = provider/tool
+	// default (10). The per-call num_results tool parameter can still lower it.
+	SearchMaxResults int `json:"searchMaxResults,omitempty"`
+}
+
+// Memory backend and scope values accepted by MemorySettings.Backend/Scope.
+const (
+	MemoryBackendOff       = "off"
+	MemoryBackendHindsight = "hindsight"
+
+	MemoryScopeProject = "project"
+	MemoryScopeGlobal  = "global"
+)
+
+// MemorySettings configures the optional Hindsight long-term memory backend.
+// Everything is off until Backend is set to "hindsight".
+type MemorySettings struct {
+	// Backend selects the memory backend: "" / "off" (default) disables
+	// everything; "hindsight" enables the remote Hindsight server.
+	Backend string `json:"backend,omitempty"`
+
+	// URL is the Hindsight server base URL. Empty resolves to the Hindsight
+	// standard default (http://localhost:8888). The HINDSIGHT_API_URL
+	// environment variable overrides both (resolved by internal/memory).
+	URL string `json:"url,omitempty"`
+
+	// Scope selects memory bank isolation: "project" (default) derives a
+	// per-repository bank id; "global" uses one shared bank.
+	Scope string `json:"scope,omitempty"`
+
+	// AutoRecall injects one recall per new user task when the backend is
+	// enabled. Tri-state: nil/absent = default on (explicit false disables),
+	// matching the ContextBar opt-out pattern.
+	AutoRecall *bool `json:"autoRecall,omitempty"`
+
+	// AutoRetain stores consolidated turn digests at turn boundaries.
+	// Default off (plain bool: absent = false).
+	AutoRetain bool `json:"autoRetain,omitempty"`
+
+	// MaxResults caps recall results injected/returned. 0 = default (5).
+	MaxResults int `json:"maxResults,omitempty"`
+}
+
+// Enabled reports whether a memory backend is configured (and thus whether
+// the client, tools, and auto-recall should exist at all).
+func (m MemorySettings) Enabled() bool { return m.Backend == MemoryBackendHindsight }
+
+// ResolvedURL returns the configured URL or the Hindsight standard default.
+func (m MemorySettings) ResolvedURL() string {
+	if m.URL != "" {
+		return m.URL
+	}
+	return "http://localhost:8888"
+}
+
+// ResolvedScope returns the configured scope or the default (project).
+func (m MemorySettings) ResolvedScope() string {
+	if m.Scope == "" {
+		return MemoryScopeProject
+	}
+	return m.Scope
+}
+
+// AutoRecallOn returns the tri-state auto-recall flag, defaulting to on.
+func (m MemorySettings) AutoRecallOn() bool { return m.AutoRecall == nil || *m.AutoRecall }
+
+// ResolvedMaxResults returns the recall result cap or the default (5).
+func (m MemorySettings) ResolvedMaxResults() int {
+	if m.MaxResults > 0 {
+		return m.MaxResults
+	}
+	return 5
+}
+
+// Validate rejects unknown backend/scope values so a typo fails loudly at
+// save time instead of silently disabling memory.
+func (m MemorySettings) Validate() error {
+	switch m.Backend {
+	case "", MemoryBackendOff, MemoryBackendHindsight:
+	default:
+		return fmt.Errorf("memory.backend must be %q or %q (got %q)", MemoryBackendOff, MemoryBackendHindsight, m.Backend)
+	}
+	switch m.Scope {
+	case "", MemoryScopeProject, MemoryScopeGlobal:
+	default:
+		return fmt.Errorf("memory.scope must be %q or %q (got %q)", MemoryScopeProject, MemoryScopeGlobal, m.Scope)
+	}
+	if m.MaxResults < 0 {
+		return fmt.Errorf("memory.maxResults must be ≥ 0 (got %d)", m.MaxResults)
+	}
+	return nil
 }
 
 // SubagentSettings controls how many background agents may run in parallel.
@@ -826,6 +931,8 @@ func (s *Data) Clone() *Data {
 	dst.Model = s.Model
 	dst.Theme = s.Theme
 	dst.SearchProvider = s.SearchProvider
+	dst.SearchURL = s.SearchURL
+	dst.SearchMaxResults = s.SearchMaxResults
 	dst.StreamFirstChunkTimeout = s.StreamFirstChunkTimeout
 	dst.StreamIdleTimeout = s.StreamIdleTimeout
 	dst.HookUITimeout = s.HookUITimeout
@@ -840,6 +947,11 @@ func (s *Data) Clone() *Data {
 		}
 	}
 	dst.Subagents = s.Subagents // value type; shallow copy is correct
+	dst.Memory = s.Memory       // value type; the one pointer is dup'd below
+	if s.Memory.AutoRecall != nil {
+		v := *s.Memory.AutoRecall
+		dst.Memory.AutoRecall = &v
+	}
 	if s.AllowBypass != nil {
 		v := *s.AllowBypass
 		dst.AllowBypass = &v

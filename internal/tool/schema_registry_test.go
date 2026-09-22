@@ -31,6 +31,24 @@ func TestManageableToolsIncludeConditionalEvolve(t *testing.T) {
 	}
 }
 
+// TestMemoryToolsAreSchemaGated pins the zero-overhead-when-off contract:
+// retain/recall/reflect are registered (dispatch resolves them) but never
+// appear in the default model-facing schemas — they arrive only via
+// ExtraTools when the Hindsight backend is enabled.
+func TestMemoryToolsAreSchemaGated(t *testing.T) {
+	for _, name := range []string{tool.ToolRetain, tool.ToolRecall, tool.ToolReflect} {
+		if _, ok := tool.Get(name); !ok {
+			t.Errorf("memory tool %q must be registered for dispatch", name)
+		}
+		if _, ok := findSchema(tool.GetToolSchemas(), name); ok {
+			t.Errorf("memory tool %q must stay out of the default schema set (gate via ExtraTools)", name)
+		}
+		if _, ok := findSchema(tool.GetManageableToolSchemasWith(tool.SchemaOptions{}), name); !ok {
+			t.Errorf("memory tool %q must be manageable in /tools", name)
+		}
+	}
+}
+
 // TestBuiltinToolsAllRegistered guards the invariant the self-describing
 // refactor establishes: every name in the presentation order resolves to a
 // registered tool that describes itself, so a tool can't silently vanish from
@@ -64,10 +82,17 @@ func TestBuiltinOrderCoversEveryRegisteredTool(t *testing.T) {
 
 	// Tools deliberately kept out of builtinToolOrder. Evolve is injected
 	// per-turn with capability-tailored parameters (SchemaOptions.ExtraTools),
-	// never through the registry-sourced order. A new entry here must be a
-	// conscious decision, not a forgotten wiring step.
+	// never through the registry-sourced order. The three memory tools
+	// (retain/recall/reflect) are registered the same way but reach the model
+	// only through ExtraTools when memory.backend = hindsight — presenting
+	// them unconditionally would charge every session for an optional feature.
+	// A new entry here must be a conscious decision, not a forgotten wiring
+	// step.
 	exempt := map[string]bool{
-		tool.ToolEvolve: true,
+		tool.ToolEvolve:  true,
+		tool.ToolRecall:  true,
+		tool.ToolRetain:  true,
+		tool.ToolReflect: true,
 	}
 
 	for _, name := range tool.List() {

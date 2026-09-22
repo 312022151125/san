@@ -20,6 +20,7 @@ import (
 	"github.com/genai-io/san/internal/setting"
 	"github.com/genai-io/san/internal/task"
 	"github.com/genai-io/san/internal/tool"
+	toolmemory "github.com/genai-io/san/internal/tool/memory"
 	"github.com/genai-io/san/internal/tool/perm"
 	"go.uber.org/zap"
 )
@@ -533,7 +534,7 @@ func (e *Executor) buildAgent(ctx context.Context, run *preparedRun, onToolExec 
 	if e.mcpTools != nil {
 		mcpGetter = e.mcpTools.GetToolSchemas
 	}
-	toolSet := newAgentToolSet(rc.config.AllowTools.Names(), rc.config.DenyTools.BareNames(), e.disabledToolsSnapshot(), mcpGetter)
+	toolSet := newAgentToolSet(rc.config.AllowTools.Names(), rc.config.DenyTools.BareNames(), e.disabledToolsSnapshot(), mcpGetter, toolmemory.Schemas())
 	schemas := filterSchemasForPermission(toolSet.Tools(), rc.permMode, rc.config.AllowTools)
 	var ag core.Agent
 	adaptOpts := []tool.AdaptOption{tool.WithMessagesGetterProvider(func() []core.Message {
@@ -922,11 +923,14 @@ func modeAllowsSchema(mode PermissionMode, name string) bool {
 }
 
 // newAgentToolSet creates a tool.Set for subagents with global and per-agent
-// exclusions eagerly initialized.
-func newAgentToolSet(allow, disallow []string, disabled map[string]bool, mcpGetter func() []core.ToolSchema) *tool.Set {
+// exclusions eagerly initialized. extraTools carries caller-built conditional
+// schemas (currently the Hindsight memory tools when the backend is on); the
+// allow-list filter decides per agent whether any of them surface — retain
+// never does, being parent-only.
+func newAgentToolSet(allow, disallow []string, disabled map[string]bool, mcpGetter func() []core.ToolSchema, extraTools []core.ToolSchema) *tool.Set {
 	s := &tool.Set{
 		Allow: slices.Clone(allow), Disallow: slices.Clone(disallow), Disabled: maps.Clone(disabled),
-		MCP: mcpGetter, IsAgent: true,
+		MCP: mcpGetter, IsAgent: true, ExtraTools: extraTools,
 	}
 	s.InitDisallowSet()
 	return s
