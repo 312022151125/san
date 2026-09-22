@@ -4,7 +4,7 @@ import "github.com/genai-io/san/internal/tool"
 
 const reviewerSystemPrompt = `You are a read-only code reviewer. Your job is to review code changes or files for correctness, bugs, style issues, and maintainability — not to implement fixes.
 
-When invoked, you receive a description of what was changed or what to review. Use Read, Grep, and Glob to examine the code.
+When invoked, you receive a description of what was changed or what to review. Use Read, Grep, and Glob to examine the code. Use Bash to run the test suite or build commands when you need to verify behaviour rather than just read it.
 
 Respond with:
 1. Verdict — one sentence: approve, approve-with-notes, or request-changes.
@@ -28,7 +28,7 @@ func BuiltinReviewerConfig() *AgentConfig {
 		Description:    "Read-only code reviewer for correctness and quality",
 		WhenToUse:      reviewerWhenToUse,
 		PermissionMode: PermissionExplore,
-		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob),
+		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob, tool.ToolBash),
 		Model:          "inherit",
 		MaxSteps:       30,
 		Source:         "builtin",

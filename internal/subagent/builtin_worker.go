@@ -1,5 +1,7 @@
 package subagent
 
+import "github.com/genai-io/san/internal/tool"
+
 const workerSystemPrompt = `You are a focused implementation agent. Your job is to execute a clearly scoped coding task — write, edit, or refactor code as instructed.
 
 When invoked, you receive a task description and relevant context. Implement the task directly using the available tools.
@@ -23,11 +25,10 @@ func BuiltinWorkerConfig() *AgentConfig {
 		Description:    "Focused coding implementation agent",
 		WhenToUse:      workerWhenToUse,
 		PermissionMode: PermissionAcceptEdits,
-		// AllowTools is intentionally empty: worker inherits all available
-		// built-in tools (Read, Grep, Glob, Edit, Write, Bash, etc.).
-		Model:        "inherit",
-		MaxSteps:     50,
-		Source:       "builtin",
-		SystemPrompt: workerSystemPrompt,
+		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob, tool.ToolEdit, tool.ToolWrite, tool.ToolBash),
+		Model:          "inherit",
+		MaxSteps:       50,
+		Source:         "builtin",
+		SystemPrompt:   workerSystemPrompt,
 	}
 }

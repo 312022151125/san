@@ -88,10 +88,11 @@ func ResetDefaultRegistry()           // test-only
   split executor concerns (charter assembly, run loop, session attribution).
 - `builtin_advisor.go`, `builtin_explore.go`, `builtin_worker.go`,
   `builtin_reviewer.go` — compiled-in default agent definitions.
-  `advisor`, `explore`, `reviewer`: `PermissionExplore`, `Read/Grep/Glob`,
-  `MaxSteps: 30`. `worker`: `PermissionAcceptEdits`, inherits all tools,
-  `MaxSteps: 50`. All registered at lowest priority; any user/project
-  `<name>.md` overrides the built-in with the same name.
+  `advisor` and `explore`: `PermissionExplore`, `Read/Grep/Glob`, `MaxSteps: 30`.
+  `reviewer`: `PermissionExplore`, `Read/Grep/Glob/Bash`, `MaxSteps: 30`.
+  `worker`: `PermissionAcceptEdits`, `Read/Grep/Glob/Edit/Write/Bash`, `MaxSteps: 50`.
+  All registered at lowest priority; any user/project `<name>.md` overrides the
+  built-in with the same name.
 - `loader.go` — reads markdown agent definitions from `.san/agents/`
   (project, then user), `.claude/agents/` (Claude Code compatible), and
   plugin paths; lower-priority sources load first so higher ones win by
