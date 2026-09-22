@@ -73,6 +73,9 @@ var toolActivityParams = map[string]string{
 	"TaskCreate": "subject",
 	"TaskUpdate": "taskId",
 	"TaskGet":    "taskId",
+	"recall":     "query",
+	"reflect":    "query",
+	"retain":     "items",
 }
 
 // formatToolActivity creates an activity line for a tool call in ToolName(args) format.

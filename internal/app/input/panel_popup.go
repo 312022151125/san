@@ -86,6 +86,7 @@ func NewConfigSelector(settings *setting.Settings, agentRegistry AgentRegistry, 
 	return newPanelPopup("⚙", "Config", "appearance & settings",
 		newAppearancePanel(settings),
 		newPermissionsPanel(settings),
+		newMemoryPanel(settings),
 		newAgentsPanel(agentRegistry, settings, parentModelID),
 	)
 }

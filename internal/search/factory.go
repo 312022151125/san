@@ -26,6 +26,8 @@ func CreateProvider(name ProviderName) Provider {
 		return NewBraveProvider(secret.Resolve(braveEnvKey))
 	case ProviderTavily:
 		return NewTavilyProvider(secret.Resolve(tavilyEnvKey))
+	case ProviderSearXNG:
+		return NewSearXNGProvider()
 	case ProviderExa:
 		fallthrough
 	default:

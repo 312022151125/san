@@ -64,13 +64,20 @@ func (s *SearchSelector) Enter(store *llm.Store, width, height int) error {
 	allMeta := search.AllProviders()
 	s.items = make([]searchItem, 0, len(allMeta))
 	for _, meta := range allMeta {
-		available := !meta.RequiresAPIKey
+		available := !meta.RequiresAPIKey && !meta.RequiresEndpoint
 		if !available {
 			for _, envVar := range meta.EnvVars {
 				if secret.Resolve(envVar) != "" {
 					available = true
 					break
 				}
+			}
+		}
+		// Endpoint-based providers (SearXNG) can also be configured through
+		// settings searchUrl, which the env-var sweep above cannot see.
+		if !available && meta.RequiresEndpoint && s.settingSvc != nil {
+			if data := s.settingSvc.Snapshot(); data != nil && data.SearchURL != "" {
+				available = true
 			}
 		}
 		s.items = append(s.items, searchItem{

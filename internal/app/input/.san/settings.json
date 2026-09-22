@@ -1,0 +1,19 @@
+{
+  "permissions": {},
+  "selfLearn": {
+    "memory": {},
+    "skills": {
+      "enabled": true
+    }
+  },
+  "autoPilot": {
+    "steers": {}
+  },
+  "subagents": {},
+  "memory": {
+    "backend": "off",
+    "scope": "project",
+    "autoRecall": true,
+    "maxResults": 5
+  }
+}

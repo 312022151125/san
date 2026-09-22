@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/genai-io/san/internal/search"
+	"github.com/genai-io/san/internal/setting"
 	"github.com/genai-io/san/internal/tool"
 	"github.com/genai-io/san/internal/tool/toolresult"
 )
@@ -27,6 +28,13 @@ func (t *WebSearchTool) Execute(ctx context.Context, params map[string]any, cwd 
 	}
 
 	numResults := tool.GetInt(params, "num_results", 10)
+	// Global cap from settings (searchMaxResults): bounds the default and
+	// any per-call request; a lower explicit num_results still wins.
+	if s := setting.DefaultIfInit(); s != nil {
+		if cap := s.SearchMaxResults(); cap > 0 && numResults > cap {
+			numResults = cap
+		}
+	}
 
 	// Get optional domain filters
 	var allowedDomains, blockedDomains []string

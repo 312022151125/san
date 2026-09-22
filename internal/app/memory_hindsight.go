@@ -60,6 +60,12 @@ type autoRetainDoneMsg struct {
 	digest string // retained digest ("" when the retain was skipped/failed)
 }
 
+// resetHindsightCache drops the cached backend so a settings change takes
+// effect immediately instead of waiting for a config-keyed rebuild. Called
+// from the MemorySavedMsg handler (UI goroutine; the cache lock makes it safe
+// against an in-flight tool call's lookup).
+func resetHindsightCache() { hindsight.Reset() }
+
 // memoryConfig returns the live memory settings (zero value when settings
 // are not loaded — which reads as "backend off").
 func (m *model) memoryConfig() setting.MemorySettings {

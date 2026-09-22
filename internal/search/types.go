@@ -78,7 +78,11 @@ type Meta struct {
 	Name           ProviderName
 	DisplayName    string
 	RequiresAPIKey bool
-	EnvVars        []string
+	// RequiresEndpoint marks providers configured by a URL rather than an
+	// API key (currently SearXNG: settings searchUrl or SEARXNG_ENDPOINT).
+	// Availability = an endpoint is configured.
+	RequiresEndpoint bool
+	EnvVars          []string
 }
 
 // AllProviders returns metadata for all search providers
@@ -107,6 +111,13 @@ func AllProviders() []Meta {
 			DisplayName:    "Brave Search",
 			RequiresAPIKey: true,
 			EnvVars:        []string{"BRAVE_API_KEY"},
+		},
+		{
+			Name:             ProviderSearXNG,
+			DisplayName:      "SearXNG (self-hosted)",
+			RequiresAPIKey:   false,
+			RequiresEndpoint: true,
+			EnvVars:          []string{"SEARXNG_ENDPOINT", "SEARXNG_TOKEN"},
 		},
 	}
 }

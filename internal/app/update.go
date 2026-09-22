@@ -283,6 +283,19 @@ func (m *model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.conv.AddNotice("Context bar off")
 		}
 		return m, nil
+	case input.MemorySavedMsg:
+		// Refresh the in-memory handle; consumers (tool Execute, the
+		// auto-recall gate, the SearXNG endpoint) read settings per operation,
+		// so the new values apply to the next operation with no agent restart.
+		// The hindsight client cache is keyed by config, so a changed backend/
+		// URL/scope rebuilds itself on next use; drop the cache eagerly so a
+		// disable takes effect immediately.
+		if err := m.services.Setting.Reload(m.env.CWD); err != nil {
+			log.Logger().Warn("reload settings after memory save failed", zap.Error(err))
+		}
+		resetHindsightCache()
+		m.conv.AddNotice("Memory config saved (" + msg.Scope + ")")
+		return m, nil
 	case input.AllowBypassSavedMsg:
 		if err := m.services.Setting.Reload(m.env.CWD); err != nil {
 			// The in-memory handle still holds the pre-save value, and it is

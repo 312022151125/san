@@ -45,7 +45,7 @@ func NewSearXNGProvider(endpointOverride ...string) *SearXNGProvider {
 func (p *SearXNGProvider) Name() ProviderName   { return ProviderSearXNG }
 func (p *SearXNGProvider) DisplayName() string  { return "SearXNG (self-hosted)" }
 func (p *SearXNGProvider) RequiresAPIKey() bool { return false }
-func (p *SearXNGProvider) EnvVars() []string    { return []string{searxngEnvEndpoint, searXNGEnvToken} }
+func (p *SearXNGProvider) EnvVars() []string    { return []string{searxngEnvEndpoint, searxngEnvToken} }
 
 // IsAvailable reports whether an endpoint is configured (settings or env).
 // A token is optional — most instances run without auth.
