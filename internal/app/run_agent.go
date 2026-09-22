@@ -67,7 +67,9 @@ func RunAgent(opts AgentRunOptions) error {
 	executor := subagent.NewExecutor(provider, cwd, modelID, nil)
 	executor.SetResolver(llm.NewProviderPool(llm.Default().Store()))
 	if s, err := setting.Load(); err == nil {
-		executor.SetModelOverride("advisor", s.Advisor.Model)
+		for name, entry := range s.Agents {
+			executor.SetModelOverride(name, entry.Model)
+		}
 	}
 
 	if opts.Name != "" {

@@ -26,7 +26,7 @@ func mergeSettings(base, overlay *Data) *Data {
 	result.Persona = coalesce(overlay.Persona, base.Persona)
 	result.SelfLearn = mergeSelfLearn(base.SelfLearn, overlay.SelfLearn)
 	result.AutoPilot = mergeAutoPilot(base.AutoPilot, overlay.AutoPilot)
-	result.Advisor = mergeAdvisor(base.Advisor, overlay.Advisor)
+	result.Agents = mergeAgents(base.Agents, overlay.Agents)
 	result.LastOperationMode = coalesce(overlay.LastOperationMode, base.LastOperationMode)
 
 	return result
@@ -73,9 +73,26 @@ func ApplyPersonaOverlay(base, overlay *Data) *Data {
 	return mergeSettings(base, ov)
 }
 
-// mergeAdvisor does a field-level merge: non-empty overlay string wins.
-func mergeAdvisor(base, overlay AdvisorSettings) AdvisorSettings {
-	return AdvisorSettings{Model: coalesce(overlay.Model, base.Model)}
+// mergeAgents merges two AgentModelSettings maps: for each agent name present
+// in either map, the overlay's non-empty model wins; absent overlay keys keep
+// the base value. A nil result means no overrides on either side.
+func mergeAgents(base, overlay AgentModelSettings) AgentModelSettings {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+	result := make(AgentModelSettings, len(base)+len(overlay))
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range overlay {
+		if v.Model != "" {
+			result[k] = v
+		} else if _, exists := base[k]; !exists {
+			// overlay explicitly clears a key that wasn't in base — keep clear
+			result[k] = AgentModelEntry{}
+		}
+	}
+	return result
 }
 
 // mergeSelfLearn does a field-level merge of the L1 configuration: integers

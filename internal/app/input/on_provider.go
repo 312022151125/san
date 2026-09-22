@@ -204,6 +204,17 @@ type providerModelSelectedMsg struct {
 	AuthMethod   llm.AuthMethod
 }
 
+// ExtractProviderModelSelected returns the ModelID and ProviderName from a
+// providerModelSelectedMsg, and ok=true. For any other message type it returns
+// ("", "", false). Used by the app to intercept model selections that should
+// route to an agent override rather than to the session model.
+func ExtractProviderModelSelected(msg tea.Msg) (modelID, providerName string, ok bool) {
+	if m, is := msg.(providerModelSelectedMsg); is {
+		return m.ModelID, m.ProviderName, true
+	}
+	return "", "", false
+}
+
 // providerConnectResultMsg is sent when inline connection completes.
 type providerConnectResultMsg struct {
 	AuthIdx    int

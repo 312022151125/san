@@ -167,8 +167,8 @@ Override the advisor's model in `settings.json`:
 
 ```json
 {
-  "advisor": {
-    "model": "anthropic/claude-opus-4-7"
+  "agents": {
+    "advisor": { "model": "anthropic/claude-opus-4-7" }
   }
 }
 ```

@@ -117,6 +117,9 @@ type SelectorDeps struct {
 	Setting         *coresetting.Settings
 	LoadDisabled    func(userLevel bool) map[string]bool
 	UpdateDisabled  func(disabled map[string]bool, userLevel bool) error
+	// ParentModelID returns the live session model ID used in the Agents panel
+	// for the "Inherit → <model>" label. May be nil (label shows "Inherit").
+	ParentModelID func() string
 	// Evolve bundles the /evolve popup's dependencies: the live workspace
 	// source, the learned skill/memory stores, and the recent-activity
 	// accessor. See EvolveDeps.
@@ -144,7 +147,7 @@ func New(cwd string, width int, matchFunc suggest.Matcher, deps SelectorDeps) Mo
 		Plugin:    NewPluginSelector(deps.PluginRegistry),
 		Provider:  ProviderState{Selector: NewProviderSelector()},
 		Tool:      NewToolSelector(deps.LoadDisabled, deps.UpdateDisabled),
-		Config:    NewConfigSelector(deps.Setting),
+		Config:    NewConfigSelector(deps.Setting, deps.AgentRegistry, deps.ParentModelID),
 		Autopilot: NewAutopilotSelector(),
 		Evolve:    NewEvolveSelector(deps.Evolve),
 	}

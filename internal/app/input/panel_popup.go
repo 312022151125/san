@@ -79,11 +79,15 @@ func newPanelPopup(glyph, title, tagline string, panels ...Panel) PanelPopup {
 	return PanelPopup{glyph: glyph, title: title, tagline: tagline, panels: panels}
 }
 
-// NewConfigSelector builds the /config popup: Appearance and Permissions,
-// with Provider planned as a sibling panel.
-func NewConfigSelector(settings *setting.Settings) PanelPopup {
+// NewConfigSelector builds the /config popup: Appearance, Permissions, and
+// Agents (per-agent model overrides). parentModelID returns the live session
+// model used for the "Inherit → X" label in the Agents panel.
+func NewConfigSelector(settings *setting.Settings, agentRegistry AgentRegistry, parentModelID func() string) PanelPopup {
 	return newPanelPopup("⚙", "Config", "appearance & settings",
-		newAppearancePanel(settings), newPermissionsPanel(settings))
+		newAppearancePanel(settings),
+		newPermissionsPanel(settings),
+		newAgentsPanel(agentRegistry, settings, parentModelID),
+	)
 }
 
 // Enter activates the popup, re-focusing whichever panel was last open (the
@@ -216,6 +220,19 @@ func (c *PanelPopup) innerWidth() int { return min(max(c.width-10, 40), 120) }
 // ActivePanel returns the currently focused panel; nil when none are
 // registered. Exported for tests.
 func (c *PanelPopup) ActivePanel() Panel { return c.activePanel() }
+
+// ApplyAgentModelSave forwards a model-selection result to the agents panel
+// (if one is registered). Called by the app when the ProviderSelector returns
+// a model for an agent override. Returns (cmd, ok) — ok is false when no
+// agents panel is found.
+func (c *PanelPopup) ApplyAgentModelSave(agentName, model string) (tea.Cmd, bool) {
+	for _, p := range c.panels {
+		if ap, ok := p.(*agentsPanel); ok {
+			return ap.ApplyModelSave(agentName, model)
+		}
+	}
+	return nil, false
+}
 
 func (c *PanelPopup) activePanel() Panel {
 	if len(c.panels) == 0 {

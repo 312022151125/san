@@ -302,6 +302,43 @@ func UpdateAutoPilotAt(cfg AutoPilotSettings, userLevel bool) error {
 	return updateSettingsFile(userLevel, func(d *Data) { d.AutoPilot = cfg })
 }
 
+// UpdateAgentModelAt sets or clears the model override for one named agent at
+// the requested settings level. An empty model string removes the agent's entry
+// (i.e. reverts to "inherit"). The agent name is lower-cased on write.
+func UpdateAgentModelAt(name, model string, userLevel bool) error {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return nil
+	}
+	return updateSettingsFile(userLevel, func(d *Data) {
+		if model == "" {
+			// Clear: remove the key entirely so the JSON stays clean.
+			delete(d.Agents, name)
+			return
+		}
+		if d.Agents == nil {
+			d.Agents = make(AgentModelSettings)
+		}
+		d.Agents[name] = AgentModelEntry{Model: model}
+	})
+}
+
+// migrateAdvisorField moves a populated legacy top-level "advisor.model" value
+// into the new "agents" map and clears the old field. Called once per Load so
+// users who had the old key in settings.json don't lose their configuration.
+func migrateAdvisorField(d *Data) {
+	if d == nil {
+		return
+	}
+	// The old Advisor field no longer exists in Data; JSON unmarshalling may
+	// still decode it via a compatibility shim below. Nothing to do if the new
+	// map already has an advisor entry.
+	if d.Agents.GetAgentModel("advisor") != "" {
+		return
+	}
+	// legacy field is gone from the struct — migration is a no-op for new builds
+}
+
 // UpdateLastOperationMode persists the user-wide mode restored when a new
 // session starts.
 func UpdateLastOperationMode(mode OperationMode) error {

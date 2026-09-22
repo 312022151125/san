@@ -145,6 +145,12 @@ type model struct {
 	// the next turn.
 	agentDisabledToolsSignature string
 
+	// pendingAgentModelName holds the agent name while the ProviderSelector
+	// is open to pick that agent's model. When a providerModelSelectedMsg
+	// arrives and this is non-empty, the selection is routed to the agents
+	// panel instead of switching the session model.
+	pendingAgentModelName string
+
 	// agentRestartMessages is the last live main-agent chain captured before a
 	// deliberate stop. The UI conversation is a rendering model and can be
 	// empty or temporarily divergent, so it is not authoritative for rebuilding

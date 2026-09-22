@@ -68,20 +68,39 @@ type Data struct {
 	AutoPilot AutoPilotSettings `json:"autoPilot"`
 	// LastOperationMode is the user-wide mode restored when starting a new session.
 	LastOperationMode string `json:"lastOperationMode,omitempty"`
-	// Advisor tunes the built-in advisor subagent (read-only reasoning
-	// consultant). Every field is optional; empty keeps the built-in defaults
-	// (session model, explore mode).
-	Advisor AdvisorSettings `json:"advisor"`
+	// Agents stores per-agent model overrides keyed by agent name (lower-case).
+	// An empty or absent entry means "inherit the session model". The TUI
+	// /config Agents panel writes here; the executor reads it via
+	// SetModelOverride at build time.
+	//
+	// Example settings.json:
+	//   "agents": { "advisor": { "model": "anthropic/claude-opus-4-7" } }
+	Agents AgentModelSettings `json:"agents,omitempty"`
 }
 
-// AdvisorSettings tunes the built-in advisor subagent. Every field is
-// optional; empty uses the session model.
-type AdvisorSettings struct {
-	// Model overrides the model used for advisor runs. Accepts the same forms
-	// as an agent definition's model field: a bare alias, a bare model id, or
-	// a "vendor/model" ref (e.g. "anthropic/claude-opus-4-7"). Empty inherits
-	// the session model.
+// AgentModelEntry holds the model override for one agent. Additional
+// per-agent fields (system prompt, etc.) may be added here in future without
+// changing the JSON key structure.
+type AgentModelEntry struct {
+	// Model overrides the model used for this agent's runs. Accepts the same
+	// forms as an agent definition's model field: a bare alias, a bare model
+	// id, or "vendor/model" (e.g. "anthropic/claude-opus-4-7"). Empty or
+	// absent means inherit the session model.
 	Model string `json:"model,omitempty"`
+}
+
+// AgentModelSettings is the per-agent override map (JSON key "agents").
+// Keys are agent names (lower-cased on write). A nil map is equivalent to
+// an empty map — no overrides.
+type AgentModelSettings map[string]AgentModelEntry
+
+// GetAgentModel returns the model override for the named agent, or "" when
+// no override is configured (meaning: inherit the session model).
+func (s AgentModelSettings) GetAgentModel(name string) string {
+	if s == nil {
+		return ""
+	}
+	return s[strings.ToLower(name)].Model
 }
 
 // AutoPilotSettings tunes the autopilot copilot. Every field is optional;
@@ -763,8 +782,13 @@ func (s *Data) Clone() *Data {
 	dst.Persona = s.Persona
 	dst.SelfLearn = s.SelfLearn // value-typed; shallow copy is correct
 	dst.AutoPilot = s.AutoPilot.Clone()
-	dst.Advisor = s.Advisor // value-typed; shallow copy is correct
 	dst.LastOperationMode = s.LastOperationMode
+	if s.Agents != nil {
+		dst.Agents = make(AgentModelSettings, len(s.Agents))
+		for k, v := range s.Agents {
+			dst.Agents[k] = v
+		}
+	}
 	if s.AllowBypass != nil {
 		v := *s.AllowBypass
 		dst.AllowBypass = &v

@@ -67,6 +67,7 @@ func newBaseModel() model {
 			Setting:         svc.Setting,
 			LoadDisabled:    svc.Setting.GetDisabledToolsAt,
 			UpdateDisabled:  svc.Setting.UpdateDisabledToolsAt,
+			ParentModelID:   func() string { return environment.GetModelID() },
 			Evolve: input.EvolveDeps{
 				Workspace: learnedStores.Snapshot,
 				Learned:   newLearnedSkillStore(learnedStores.Snapshot),

@@ -71,12 +71,12 @@ The advisor has access to `Read`, `Grep`, and `Glob` only. It operates in
 ## Model Override
 
 By default the advisor inherits the session model. To use a stronger reasoning
-model, set `advisor.model` in `settings.json`:
+model, set `agents.advisor.model` in `settings.json`:
 
 ```json
 {
-  "advisor": {
-    "model": "anthropic/claude-opus-4-7"
+  "agents": {
+    "advisor": { "model": "anthropic/claude-opus-4-7" }
   }
 }
 ```

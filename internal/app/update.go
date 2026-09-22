@@ -14,6 +14,8 @@
 package app
 
 import (
+	"context"
+
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"go.uber.org/zap"
@@ -323,6 +325,32 @@ func (m *model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// one of those fires.
 		m.services.Reminder.RequeueSystemReminders()
 		return m, nil
+	case input.AgentModelPickingMsg:
+		// The agents panel wants to open the ProviderSelector for this agent.
+		// Store the name so providerModelSelectedMsg is routed back to the
+		// agents panel instead of switching the session model.
+		m.pendingAgentModelName = msg.AgentName
+		ctx := context.Background()
+		cmd, err := m.userInput.Provider.Selector.Enter(ctx, m.env.Width, m.env.Height)
+		if err != nil {
+			log.Logger().Warn("failed to open provider selector for agent model pick", zap.Error(err))
+			m.pendingAgentModelName = ""
+			return m, nil
+		}
+		return m, cmd
+	case input.AgentModelSavedMsg:
+		// An agent model override was persisted (or cleared). Propagate it to
+		// the live executor so newly spawned subagents use the updated model.
+		m.rewireAgentModelOverride(msg.AgentName, msg.Model)
+		if msg.Model != "" {
+			m.conv.AddNotice("Agent " + msg.AgentName + " → " + msg.Model)
+		} else {
+			m.conv.AddNotice("Agent " + msg.AgentName + " model cleared (inherit)")
+		}
+		if err := m.services.Setting.Reload(m.env.CWD); err != nil {
+			log.Logger().Warn("reload settings after agent model save failed", zap.Error(err))
+		}
+		return m, nil
 	case input.AgentToggleMsg:
 		// Why stop on toggle: the agents directory lives in the Agent tool's
 		// description, which is frozen at agent build time. Stopping forces
@@ -396,6 +424,12 @@ func (m *model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 // goes last because it primarily produces messages, doesn't consume
 // them. Returns (cmd, true) if any sub-model handled the message.
 func (m *model) routeToSubModel(msg tea.Msg) (tea.Cmd, bool) {
+	// Intercept providerModelSelectedMsg when the agent-model picker is open
+	// so the selection sets the agent override instead of switching the
+	// session model.
+	if cmd, ok := m.interceptAgentModelPick(msg); ok {
+		return cmd, true
+	}
 	if cmd, ok := conv.Update(m, &m.conv, msg); ok {
 		return cmd, true
 	}
