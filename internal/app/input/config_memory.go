@@ -2,13 +2,13 @@
 // URL-based web-search keys, edited as one flat list under two section
 // headings.
 //
-//   MEMORY      — Backend (Off / Hindsight), Server, Scope (Project /
-//                 Global), Auto Recall (On / Off), Auto Retain (On / Off),
-//                 Max Results.
-//   WEB SEARCH  — Server (settings searchUrl, read by the SearXNG provider),
-//                 Max Results (global WebSearch cap). The provider itself is
-//                 chosen in the existing /search selector — noted here, not
-//                 duplicated.
+//	MEMORY      — Backend (Off / Hindsight), Server, Scope (Project /
+//	              Global), Auto Recall (On / Off), Auto Retain (On / Off),
+//	              Max Results.
+//	WEB SEARCH  — Server (settings searchUrl, read by the SearXNG provider),
+//	              Max Results (global WebSearch cap). The provider itself is
+//	              chosen in the existing /search selector — noted here, not
+//	              duplicated.
 //
 // Defaults: memory backend off, so a fresh install shows a panel that
 // changes nothing. Every field is read per operation by the consumers (tool
@@ -41,9 +41,9 @@ type MemorySavedMsg struct {
 // memSnap is the panel's working buffer — all fields comparable so Dirty is
 // an ==.
 type memSnap struct {
-	backend          string  // "off" | "hindsight"
+	backend          string // "off" | "hindsight"
 	url              string
-	scope            string  // "project" | "global"
+	scope            string // "project" | "global"
 	autoRecall       bool
 	autoRetain       bool
 	maxResults       int
@@ -56,10 +56,10 @@ type memRowKind int
 
 const (
 	memSection memRowKind = iota
-	memRadio   // one option of a group: enter applies it
-	memText    // inline-edited free text (enter)
-	memInt     // inline-edited number (enter)
-	memNote    // static muted hint (not editable, not selectable)
+	memRadio              // one option of a group: enter applies it
+	memText               // inline-edited free text (enter)
+	memInt                // inline-edited number (enter)
+	memNote               // static muted hint (not editable, not selectable)
 	memSave
 )
 
@@ -307,14 +307,14 @@ func (p *memoryPanel) Render(width int, _ int) string {
 		case memSave:
 			style := selflearnSaveButtonStyle
 			b.WriteString("  " + style.Render("Save") +
-				selflearnMutedStyle.Render("  or " + keycap("esc") + selflearnMutedStyle.Render(" to discard")))
+				selflearnMutedStyle.Render("  or "+keycap("esc")+selflearnMutedStyle.Render(" to discard")))
 			b.WriteString("\n")
 		}
 	}
 
 	if p.saveErr != nil {
 		b.WriteString("\n")
-		b.WriteString(selflearnErrorStyle.Render("⚠ "+p.saveErr.Error()))
+		b.WriteString(selflearnErrorStyle.Render("⚠ " + p.saveErr.Error()))
 		b.WriteString("\n")
 	}
 	return b.String()

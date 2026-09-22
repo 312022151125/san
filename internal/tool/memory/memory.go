@@ -53,9 +53,11 @@ func backend(cwd string) *hindsight.Backend {
 // RecallTool searches long-term memory for facts relevant to a query.
 type RecallTool struct{}
 
-func (t *RecallTool) Name() string        { return tool.ToolRecall }
-func (t *RecallTool) Description() string { return "Search long-term memory for relevant facts from prior sessions" }
-func (t *RecallTool) Icon() string        { return IconMemory }
+func (t *RecallTool) Name() string { return tool.ToolRecall }
+func (t *RecallTool) Description() string {
+	return "Search long-term memory for relevant facts from prior sessions"
+}
+func (t *RecallTool) Icon() string { return IconMemory }
 
 func (t *RecallTool) Schema() core.ToolSchema {
 	return core.ToolSchema{
@@ -221,9 +223,11 @@ func parseItems(params map[string]any) ([]hindsight.RetainItem, error) {
 // accumulated memory.
 type ReflectTool struct{}
 
-func (t *ReflectTool) Name() string        { return tool.ToolReflect }
-func (t *ReflectTool) Description() string { return "Synthesize an answer over accumulated long-term memory" }
-func (t *ReflectTool) Icon() string        { return IconMemory }
+func (t *ReflectTool) Name() string { return tool.ToolReflect }
+func (t *ReflectTool) Description() string {
+	return "Synthesize an answer over accumulated long-term memory"
+}
+func (t *ReflectTool) Icon() string { return IconMemory }
 
 func (t *ReflectTool) Schema() core.ToolSchema {
 	return core.ToolSchema{

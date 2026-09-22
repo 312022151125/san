@@ -164,7 +164,6 @@ func (m *model) OnTurnEnd(result core.Result) tea.Cmd {
 		commitCmds = append(commitCmds, cmd)
 	}
 
-
 	if cmd, found := m.drainTurnQueues(); found {
 		log.QueueLog("OnTurnEnd: drained queued message, skipping hooks")
 		if cmd != nil {

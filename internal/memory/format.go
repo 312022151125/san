@@ -8,7 +8,7 @@ import (
 // FormatBullets renders recalled memories as the compact bullet list both
 // auto-recall (app layer) and the recall tool put in front of the model:
 //
-//	- <text> [<type>] (YYYY-MM-DD)
+//   - <text> [<type>] (YYYY-MM-DD)
 //
 // type/date suffixes appear only when present. limit > 0 caps the bullets.
 // An empty result set renders as the canonical no-hits line, so callers can

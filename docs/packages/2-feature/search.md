@@ -7,7 +7,8 @@ layer: feature
 
 Pluggable web search backends behind a small consumer-defined `Provider`
 interface. Implementations: Exa (default, no API key), Tavily, Serper,
-Brave.
+Brave, SearXNG (self-hosted, endpoint-based — settings `searchUrl` or
+`SEARXNG_ENDPOINT`; no API key).
 
 ## Purpose
 
@@ -49,10 +50,11 @@ type SearchOptions struct {
 type ProviderName string
 
 const (
-    ProviderExa    ProviderName = "exa"
-    ProviderTavily ProviderName = "tavily"
-    ProviderSerper ProviderName = "serper"
-    ProviderBrave  ProviderName = "brave"
+    ProviderExa     ProviderName = "exa"
+    ProviderTavily  ProviderName = "tavily"
+    ProviderSerper  ProviderName = "serper"
+    ProviderBrave   ProviderName = "brave"
+    ProviderSearXNG ProviderName = "searxng"
 )
 
 func AllProviders() []Meta   // metadata for the selector UI
@@ -74,9 +76,11 @@ check), the value types are flat structs, and there is no singleton.
 
 - `factory.go` — name → constructor map. `New(name)` returns a
   `Provider` for the named backend.
-- `exa.go`, `tavily.go`, `brave.go`, `serper.go` — backend
+- `exa.go`, `tavily.go`, `brave.go`, `serper.go`, `searxng.go` — backend
   implementations. Each handles its provider's auth, request shape, and
-  response normalization.
+  response normalization. SearXNG resolves its endpoint per call (settings
+  `searchUrl` → `SEARXNG_ENDPOINT`), so selecting it costs nothing until
+  `WebSearch` actually runs.
 - `types.go` — `Provider`, `SearchResult`, `SearchOptions`, and the
   `AllProviders()` metadata table.
 
@@ -93,6 +97,7 @@ check), the value types are flat structs, and there is no singleton.
 internal/search/exa_test.go      — Exa request/response.
 internal/search/factory_test.go  — name → constructor mapping.
 internal/search/tavily_test.go   — Tavily request/response.
+internal/search/searxng_test.go  — SearXNG request shape, auth, normalization, endpoint gating.
 ```
 
 ## See Also

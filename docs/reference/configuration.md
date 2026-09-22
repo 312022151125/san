@@ -31,9 +31,32 @@ Configuration is loaded from multiple files at different scopes. Higher-priority
   "env": { "MY_VAR": "value" },
   "enabledPlugins": { "my-plugin": true },
   "disabledTools": { "WebSearch": true, "Cron": false },
-  "theme": "dark"
+  "theme": "dark",
+  "searchProvider": "searxng",
+  "searchUrl": "http://localhost:8080",
+  "searchMaxResults": 5,
+  "memory": {
+    "backend": "off",
+    "url": "http://localhost:8888",
+    "scope": "project",
+    "autoRecall": true,
+    "autoRetain": false,
+    "maxResults": 5
+  }
 }
 ```
+
+**Optional backends (both off by default):**
+
+- `memory` — Hindsight long-term memory. `backend: "hindsight"` enables the
+  `retain`/`recall`/`reflect` tools and (with `autoRecall`) one recall per
+  user task; `off` means no client, no tools, no overhead. See
+  [`packages/memory.md`](../packages/2-feature/memory.md).
+- `searchProvider: "searxng"` — a self-hosted SearXNG instance for
+  `WebSearch`; its endpoint comes from `searchUrl` or `SEARXNG_ENDPOINT`.
+  Credentials for both backends are env/secret-only:
+  `HINDSIGHT_API_URL`, `HINDSIGHT_API_TOKEN`, `SEARXNG_ENDPOINT`,
+  `SEARXNG_TOKEN` — never settings.json.
 
 ## UI Interactions
 

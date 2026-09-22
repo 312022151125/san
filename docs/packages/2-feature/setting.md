@@ -39,6 +39,9 @@ func (s *Settings) Reload(cwd string) error
 func (s *Settings) DisabledTools() map[string]bool
 func (s *Settings) SearchProvider() string
 func (s *Settings) SetSearchProvider(provider string)
+func (s *Settings) SearchURL() string         // endpoint for URL-based providers (SearXNG)
+func (s *Settings) SearchMaxResults() int     // global WebSearch cap (0 = default)
+func (s *Settings) Memory() MemorySettings    // memory backend config (zero value = off)
 func (s *Settings) Hooks() map[string][]Hook
 func (s *Settings) CheckPermission(toolName string, args map[string]any, session *SessionPermissions) PermissionBehavior
 func (s *Settings) HasPermissionToUseTool(toolName string, args map[string]any, session *SessionPermissions) PermissionDecision
@@ -57,10 +60,16 @@ func ResetDefaultSettings()              // test-only
 
 ## Internals
 
-- `Data` (`settings.go`) — value type holding all merged config.
+- `Data` (`settings.go`) — value type holding all merged config. Notable
+  optional-backend sections: `MemorySettings` (`memory` — backend off by
+  default; validate/merge/clone hooks mirror `SubagentSettings`) and the
+  flat `searchUrl` / `searchMaxResults` keys consumed by the SearXNG
+  provider and the WebSearch tool.
 - `loader.go` + `merger.go` — read the two tiers and combine them with
   documented precedence (project overrides user, except in a few flagged
-  fields).
+  fields). Block-level writers for the TUI: `UpdateMemoryAt`,
+  `UpdateSearchAt`, `UpdateSelfLearnAt`, `UpdateSubagentsAt` — each
+  rewrites only its own block so a save never clobbers neighboring keys.
 - `permission.go` — the rule engine. Big file (19k); deserves to move out
   to a `service/permission/` package per the split above.
 - `bash_ast.go` — bash command parsing for the granular Bash permission

@@ -47,16 +47,16 @@ func memoryModel(t *testing.T, cfg setting.MemorySettings) *model {
 
 func TestShouldAutoRecallGates(t *testing.T) {
 	cases := []struct {
-		name         string
-		cfg          setting.MemorySettings
-		inFlight     bool
-		autopilot    bool
-		wantRecall   bool
+		name       string
+		cfg        setting.MemorySettings
+		inFlight   bool
+		autopilot  bool
+		wantRecall bool
 	}{
 		{"backend off (default)", setting.MemorySettings{}, false, false, false},
 		{"backend on, auto on", setting.MemorySettings{Backend: setting.MemoryBackendHindsight}, false, false, true},
 		{"auto-recall explicitly off", setting.MemorySettings{
-			Backend: setting.MemoryBackendHindsight,
+			Backend:    setting.MemoryBackendHindsight,
 			AutoRecall: boolPtr(false),
 		}, false, false, false},
 		{"recall already in flight", setting.MemorySettings{Backend: setting.MemoryBackendHindsight}, true, false, false},
@@ -212,9 +212,9 @@ func TestAutoRetainGatesAndDigest(t *testing.T) {
 
 	t.Run("single-flight and digest dedupe", func(t *testing.T) {
 		m := memoryModel(t, setting.MemorySettings{
-			Backend: setting.MemoryBackendHindsight,
+			Backend:    setting.MemoryBackendHindsight,
 			AutoRetain: true,
-			URL:     "http://127.0.0.1:1", // retain will fail; that's fine, we test the gates
+			URL:        "http://127.0.0.1:1", // retain will fail; that's fine, we test the gates
 		})
 		t.Setenv("HINDSIGHT_API_URL", "")
 		m.conv.Messages = []core.ChatMessage{{Role: core.ChatUser, Content: "task", DisplayContent: "task"}}
@@ -258,5 +258,3 @@ func TestLastHumanRequestSkipsToolResults(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
-
-

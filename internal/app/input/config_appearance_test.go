@@ -182,10 +182,15 @@ func TestConfigSelectorTabSwitchesPanels(t *testing.T) {
 	if got := c.ActivePanel().Title(); got != "permissions" {
 		t.Fatalf("after tab = %q, want permissions", got)
 	}
-	// permissions → agents
+	// permissions → memory
+	c.HandleKeypress(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := c.ActivePanel().Title(); got != "memory" {
+		t.Fatalf("after second tab = %q, want memory", got)
+	}
+	// memory → agents
 	c.HandleKeypress(tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := c.ActivePanel().Title(); got != "agents" {
-		t.Fatalf("after second tab = %q, want agents", got)
+		t.Fatalf("after third tab = %q, want agents", got)
 	}
 	// agents → appearance (wrap)
 	c.HandleKeypress(tea.KeyPressMsg{Code: tea.KeyTab})

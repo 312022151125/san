@@ -120,7 +120,7 @@ func readGitFile(gitFile string) string {
 func rootHash(root string) string {
 	const (
 		offset64 = 14695981039346656037
-		prime64 = 1099511628211
+		prime64  = 1099511628211
 	)
 	h := uint64(offset64)
 	for i := 0; i < len(root); i++ {

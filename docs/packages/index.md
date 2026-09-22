@@ -46,7 +46,7 @@ visible right next to its original. Every page follows [`TEMPLATE.md`](TEMPLATE.
 | [`hook`](2-feature/hook.md) | Pre/post hook engine with command / HTTP / LLM / function executors. |
 | [`inspector`](2-feature/inspector.md) | Local web UI for transcript replay; SSE live-tail. |
 | [`llm`](2-feature/llm.md) | Provider registry, model store, and the per-turn `*ai.Client` the agent loop streams through. |
-| [`mcp`](2-feature/mcp.md) | MCP client + transport + `Caller` for external tool servers. |
+| [`memory`](2-feature/memory.md) | Optional Hindsight long-term memory: lazy retain/recall/reflect client, project-scoped banks, auto-recall/retain gates. |
 | [`plugin`](2-feature/plugin.md) | Plugin loader / installer / marketplace; pushes contributions to other feature packages. |
 | [`reminder`](2-feature/reminder.md) | `<system-reminder>` queue with provider re-emission. |
 | [`search`](2-feature/search.md) | Pluggable web search backends behind a small `Provider` interface. |

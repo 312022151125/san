@@ -122,9 +122,9 @@ func TestRetainValidatesItems(t *testing.T) {
 	hindsightReset()
 
 	cases := []map[string]any{
-		{},                              // missing items
-		{"items": []any{}},              // empty
-		{"items": []any{"not-object"}},  // wrong shape
+		{},                             // missing items
+		{"items": []any{}},             // empty
+		{"items": []any{"not-object"}}, // wrong shape
 		{"items": []any{map[string]any{"content": "  "}}}, // blank content
 	}
 	for i, params := range cases {

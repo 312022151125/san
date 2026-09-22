@@ -116,8 +116,8 @@ type model struct {
 	// digest in flight at a time, cleared when its done-message arrives on
 	// the UI goroutine. lastRetainedDigest skips re-storing an unchanged
 	// digest (autopilot chains can end several turns identically).
-	autoRetainInFlight  bool
-	lastRetainedDigest  string
+	autoRetainInFlight bool
+	lastRetainedDigest string
 
 	// updateInstalled / updateFailed record the background auto-update's
 	// outcome: the release now on disk (the status line asks for a restart),

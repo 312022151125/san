@@ -80,8 +80,8 @@ type retainRequest struct {
 }
 
 type recallRequest struct {
-	Query    string `json:"query"`
-	MaxTokens int   `json:"max_tokens,omitempty"`
+	Query     string `json:"query"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
 type recallResponse struct {

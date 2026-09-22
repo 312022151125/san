@@ -21,8 +21,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/genai-io/san/internal/core"
-	hindsight "github.com/genai-io/san/internal/memory"
 	"github.com/genai-io/san/internal/log"
+	hindsight "github.com/genai-io/san/internal/memory"
 	"github.com/genai-io/san/internal/reminder"
 	"github.com/genai-io/san/internal/setting"
 )
@@ -40,8 +40,8 @@ const (
 
 	// Digest caps for auto-retain: enough to carry the task and its
 	// outcome, nowhere near the full transcript.
-	retainRequestChars  = 1000
-	retainAnswerChars   = 2000
+	retainRequestChars   = 1000
+	retainAnswerChars    = 2000
 	minRetainAnswerChars = 50 // shorter than this is an ack/error, not durable work
 )
 

@@ -35,9 +35,9 @@ func BuiltinAdvisorConfig() *AgentConfig {
 		// absent (plus parent-only): advisors read memory, they never write it.
 		AllowTools: ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob,
 			tool.ToolWebSearch, tool.ToolRecall, tool.ToolReflect),
-		Model:          "inherit",
-		MaxSteps:       30,
-		Source:         "builtin",
-		SystemPrompt:   advisorSystemPrompt,
+		Model:        "inherit",
+		MaxSteps:     30,
+		Source:       "builtin",
+		SystemPrompt: advisorSystemPrompt,
 	}
 }
