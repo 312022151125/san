@@ -63,9 +63,9 @@ type Executor struct {
 	disabledTools              map[string]bool   // effective global disabled tools, copied on set/read
 	modelOverrides             map[string]string // per-agent-name model overrides, set by SetModelOverride
 
-	// concurrencySem caps total concurrent background agents (capacity = maxBackgroundConcurrency).
-	// writerSem caps concurrent write-permitted background agents (capacity = maxBackgroundWriters).
-	// Both are buffered channels used as counting semaphores: send to acquire, receive to release.
+	// concurrencySem caps total concurrent background agents (capacity = defaultMaxBackgroundConcurrency
+	// or the value set by SetConcurrencyLimits). writerSem caps concurrent write-permitted background
+	// agents. Both are buffered channels used as counting semaphores: send to acquire, receive to release.
 	concurrencySem chan struct{}
 	writerSem      chan struct{}
 }
@@ -304,9 +304,10 @@ func (e *Executor) Run(ctx context.Context, req tool.AgentExecRequest) (*AgentRe
 // RunBackground executes an agent in the background and returns the task.
 //
 // It blocks until a concurrency slot (and, for write-permitted agents, a
-// writer slot) is available. At most maxBackgroundConcurrency agents run at
-// once; at most maxBackgroundWriters of those may hold write permissions.
-// Read-only agents (explore, advisor, reviewer) do not consume a writer slot.
+// writer slot) is available. At most the configured concurrency cap (default 3)
+// agents run at once; at most the configured writers cap (default 1) of those
+// may hold write permissions. Read-only agents (explore, advisor, reviewer) do
+// not consume a writer slot. Use SetConcurrencyLimits to override the defaults.
 func (e *Executor) RunBackground(req tool.AgentExecRequest) (*task.AgentTask, error) {
 	if err := e.validateRequest(req); err != nil {
 		return nil, err

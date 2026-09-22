@@ -83,7 +83,10 @@ func ResetDefaultRegistry()           // test-only
   session persistence), and returns the aggregated result.
   `SetModelOverride(name, model)` wires per-agent settings-level model
   preferences (e.g. advisor → stronger reasoning model) without coupling
-  the executor to specific agent names.
+  the executor to specific agent names. `SetConcurrencyLimits(concurrency,
+  writers)` resizes the background-agent semaphores from the
+  `settings.Subagents` values so the user's configured caps take effect
+  at session start.
 - `executor_prompt.go` / `executor_run.go` / `executor_session.go` —
   split executor concerns (charter assembly, run loop, session attribution).
 - `builtin_advisor.go`, `builtin_explore.go`, `builtin_worker.go`,
