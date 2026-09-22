@@ -54,6 +54,24 @@ See `docs/operations/development.md` for build / test / lint / format
 and the sandbox-friendly `GOCACHE` workaround. Update that file when
 commands change. Do not duplicate them here.
 
+## Default Agents
+
+The five conceptual default lightweight-coding agents:
+
+| Agent    | Role                                      | Notes |
+|----------|-------------------------------------------|-------|
+| explore  | Fast read-only repository exploration     | Permission mode, not a defined agent |
+| planner  | Implementation planning and decomposition | User-defined convention |
+| worker   | Coding and implementation                 | User-defined convention |
+| reviewer | Correctness review                        | User-defined convention |
+| advisor  | Difficult reasoning / second opinion      | Built-in compiled-in default |
+
+`advisor` is the only compiled-in default. The others are user-defined
+conventions documented in [`docs/guides/writing-a-subagent.md`](docs/guides/writing-a-subagent.md).
+Use `advisor` on-demand for architectural trade-offs, debugging dead ends,
+and non-trivial correctness or concurrency questions. See
+[`docs/guides/advisor-agent.md`](docs/guides/advisor-agent.md).
+
 ## Documentation Rules
 
 - Add or update docs in the same change as architecture or workflow changes.

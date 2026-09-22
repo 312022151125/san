@@ -32,6 +32,10 @@ func Initialize(opts Options) error {
 		}
 	}
 
+	// Built-in agents register first so any user- or project-level definition
+	// with the same name overrides them (LoadAgents runs after this).
+	defaultRegistry.Register(BuiltinAdvisorConfig())
+
 	LoadAgents(opts.CWD)
 
 	if err := defaultRegistry.InitStores(opts.CWD); err != nil {

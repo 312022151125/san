@@ -26,6 +26,7 @@ func mergeSettings(base, overlay *Data) *Data {
 	result.Persona = coalesce(overlay.Persona, base.Persona)
 	result.SelfLearn = mergeSelfLearn(base.SelfLearn, overlay.SelfLearn)
 	result.AutoPilot = mergeAutoPilot(base.AutoPilot, overlay.AutoPilot)
+	result.Advisor = mergeAdvisor(base.Advisor, overlay.Advisor)
 	result.LastOperationMode = coalesce(overlay.LastOperationMode, base.LastOperationMode)
 
 	return result
@@ -70,6 +71,11 @@ func ApplyPersonaOverlay(base, overlay *Data) *Data {
 	ov := overlay.Clone()
 	ov.Persona = ""
 	return mergeSettings(base, ov)
+}
+
+// mergeAdvisor does a field-level merge: non-empty overlay string wins.
+func mergeAdvisor(base, overlay AdvisorSettings) AdvisorSettings {
+	return AdvisorSettings{Model: coalesce(overlay.Model, base.Model)}
 }
 
 // mergeSelfLearn does a field-level merge of the L1 configuration: integers

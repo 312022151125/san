@@ -51,6 +51,7 @@ type Executor struct {
 	mcpServers                 mcp.Servers          // connect/disconnect for per-subagent server sets
 	disabledToolsMu            sync.RWMutex
 	disabledTools              map[string]bool // effective global disabled tools, copied on set/read
+	modelOverrides             map[string]string // per-agent-name model overrides, set by SetModelOverride
 }
 
 type SubagentSessionStore interface {
@@ -160,6 +161,22 @@ func (e *Executor) SetDisabledTools(disabled map[string]bool) {
 	e.disabledToolsMu.Lock()
 	e.disabledTools = maps.Clone(disabled)
 	e.disabledToolsMu.Unlock()
+}
+
+// SetModelOverride pins an agent-name to a specific model ref. The ref follows
+// the same syntax as an agent definition's model field: a bare alias, a bare
+// model id, or "vendor/model". An empty model string is a no-op. Calling this
+// for any named agent (e.g. "advisor", "reviewer") lets the app wire
+// settings-level model preferences without the executor needing to know which
+// agents are special.
+func (e *Executor) SetModelOverride(name, model string) {
+	if model == "" {
+		return
+	}
+	if e.modelOverrides == nil {
+		e.modelOverrides = make(map[string]string)
+	}
+	e.modelOverrides[name] = model
 }
 
 func (e *Executor) disabledToolsSnapshot() map[string]bool {
@@ -358,7 +375,17 @@ func (e *Executor) prepareRunConfig(ctx context.Context, req tool.AgentExecReque
 		maxSteps = req.MaxSteps
 	}
 
-	provider, modelID, err := e.resolveModel(ctx, req.Model, config.Model)
+	// Apply any per-agent-name settings-level model override. req.Model (a
+	// caller-supplied one-off) takes priority over the override, which in turn
+	// takes priority over the agent definition's own model field.
+	configModel := config.Model
+	if req.Model == "" {
+		if override, ok := e.modelOverrides[config.Name]; ok {
+			configModel = override
+		}
+	}
+
+	provider, modelID, err := e.resolveModel(ctx, req.Model, configModel)
 	if err != nil {
 		return nil, err
 	}

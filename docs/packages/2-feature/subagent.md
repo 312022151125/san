@@ -81,13 +81,21 @@ func ResetDefaultRegistry()           // test-only
 - `Executor` (`executor.go`) — spawns a `core.Agent` for one subagent
   invocation, manages its lifecycle (workspace, permission gate, hooks,
   session persistence), and returns the aggregated result.
+  `SetModelOverride(name, model)` wires per-agent settings-level model
+  preferences (e.g. advisor → stronger reasoning model) without coupling
+  the executor to specific agent names.
 - `executor_prompt.go` / `executor_run.go` / `executor_session.go` —
   split executor concerns (charter assembly, run loop, session attribution).
+- `builtin_advisor.go` — compiled-in default `advisor` agent definition
+  (`explore` mode, `Read/Grep/Glob`, `MaxSteps: 30`). Registered at lowest
+  priority; any user/project `advisor.md` overrides it.
 - `loader.go` — reads markdown agent definitions from `.san/agents/`
   (project, then user), `.claude/agents/` (Claude Code compatible), and
   plugin paths; lower-priority sources load first so higher ones win by
   name. Accepts alias frontmatter keys (`tools`, `allowed-tools`,
-  `permission-mode`) alongside the canonical ones.
+  `permission-mode`) alongside the canonical ones. Built-in agents
+  (`Source: "builtin"`) register before `LoadAgents()` so filesystem
+  definitions win.
 - `match.go` — `ToolList` pattern matching (allow/deny semantics) shared
   with the permission gate.
 - `activity_tools.go` — the gate that streams each call into the
@@ -96,8 +104,10 @@ func ResetDefaultRegistry()           // test-only
 
 ## Lifecycle
 
-- Construction: `Initialize(Options{CWD, PluginAgentPaths})` loads
-  definitions, initializes state stores.
+- Construction: `Initialize(Options{CWD, PluginAgentPaths})` registers
+  built-in agents (currently `advisor`), then loads user/project/plugin
+  definitions, then initializes state stores. Built-ins register first so
+  filesystem definitions win.
 - Per-invocation: `NewExecutor(provider, cwd, model, hookEngine)` →
   `Executor.Run(ctx, req)` spawns a `core.Agent`, blocks until end of
   turn, returns the aggregated `AgentResult`. `RunBackground(req)` wraps

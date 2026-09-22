@@ -68,6 +68,20 @@ type Data struct {
 	AutoPilot AutoPilotSettings `json:"autoPilot"`
 	// LastOperationMode is the user-wide mode restored when starting a new session.
 	LastOperationMode string `json:"lastOperationMode,omitempty"`
+	// Advisor tunes the built-in advisor subagent (read-only reasoning
+	// consultant). Every field is optional; empty keeps the built-in defaults
+	// (session model, explore mode).
+	Advisor AdvisorSettings `json:"advisor"`
+}
+
+// AdvisorSettings tunes the built-in advisor subagent. Every field is
+// optional; empty uses the session model.
+type AdvisorSettings struct {
+	// Model overrides the model used for advisor runs. Accepts the same forms
+	// as an agent definition's model field: a bare alias, a bare model id, or
+	// a "vendor/model" ref (e.g. "anthropic/claude-opus-4-7"). Empty inherits
+	// the session model.
+	Model string `json:"model,omitempty"`
 }
 
 // AutoPilotSettings tunes the autopilot copilot. Every field is optional;
@@ -749,6 +763,7 @@ func (s *Data) Clone() *Data {
 	dst.Persona = s.Persona
 	dst.SelfLearn = s.SelfLearn // value-typed; shallow copy is correct
 	dst.AutoPilot = s.AutoPilot.Clone()
+	dst.Advisor = s.Advisor // value-typed; shallow copy is correct
 	dst.LastOperationMode = s.LastOperationMode
 	if s.AllowBypass != nil {
 		v := *s.AllowBypass

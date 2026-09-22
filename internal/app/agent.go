@@ -765,6 +765,7 @@ func (m *model) ReconfigureAgentTool() {
 	executor.SetSkillsDirectory(m.services.Skill.PromptSection())
 	executor.SetMCPDependencies(m.services.MCP, m.services.MCP)
 	executor.SetDisabledTools(m.services.Setting.DisabledTools())
+	executor.SetModelOverride("advisor", m.services.Setting.Snapshot().Advisor.Model)
 
 	adapter := subagent.NewExecutorAdapter(executor)
 	type executorSetter interface{ SetExecutor(tool.AgentExecutor) }

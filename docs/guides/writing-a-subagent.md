@@ -154,6 +154,33 @@ A background subagent registers with the broker while running:
   `~/.san` > project `.claude` > user `~/.claude` > plugins; the
   higher-priority definition wins.
 
+## Built-in Agents
+
+San ships one compiled-in agent: `advisor`. It requires no user file and is
+always available.
+
+| Agent    | Mode      | Tools            | MaxSteps | Purpose |
+|----------|-----------|------------------|----------|---------|
+| `advisor`| `explore` | Read, Grep, Glob | 30       | Read-only reasoning consultant for difficult decisions |
+
+Override the advisor's model in `settings.json`:
+
+```json
+{
+  "advisor": {
+    "model": "anthropic/claude-opus-4-7"
+  }
+}
+```
+
+A bare alias, a bare model id, or `vendor/model` syntax are all accepted —
+the same forms as the `model:` field in any agent definition file.
+
+A user or project-level `advisor.md` file overrides the built-in.
+
+See [`docs/guides/advisor-agent.md`](advisor-agent.md) for invocation
+patterns and on-demand rules.
+
 ## See Also
 
 - [`packages/broker.md`](../packages/2-feature/broker.md) —

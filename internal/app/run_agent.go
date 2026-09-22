@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/genai-io/san/internal/llm"
+	"github.com/genai-io/san/internal/setting"
 	"github.com/genai-io/san/internal/subagent"
 	"github.com/genai-io/san/internal/tool"
 )
@@ -65,6 +66,9 @@ func RunAgent(opts AgentRunOptions) error {
 	// as TUI-spawned subagents.
 	executor := subagent.NewExecutor(provider, cwd, modelID, nil)
 	executor.SetResolver(llm.NewProviderPool(llm.Default().Store()))
+	if s, err := setting.Load(); err == nil {
+		executor.SetModelOverride("advisor", s.Advisor.Model)
+	}
 
 	if opts.Name != "" {
 		fmt.Printf("Agent: %s\n", opts.Name)
