@@ -8,29 +8,37 @@ import (
 )
 
 // AgentTool describes itself with the available-agents directory embedded when
-// one is supplied at build time.
+// one is supplied at build time, and with batch-mode parameters when enabled.
 var _ tool.AgentDirectoryAwareTool = (*AgentTool)(nil)
+var _ tool.BatchAwareTool = (*AgentTool)(nil)
 
 // Schema returns the model-facing tool definition for Agent, without an
-// available-agents directory. GetToolSchemasWith injects the directory via
-// SchemaWithAgentDirectory when one is available.
+// available-agents directory and with batch disabled. GetToolSchemasWith uses
+// SchemaWithOptions when either dynamic option is set.
 func (t *AgentTool) Schema() core.ToolSchema {
-	return agentSchema("")
+	return agentSchema("", false)
 }
 
 // SchemaWithAgentDirectory returns the Agent schema with the available-agents
-// directory embedded in the description. It satisfies tool.AgentDirectoryAwareTool
-// so the schema follows the live agent catalog on each rebuild. An empty
-// directory yields the same result as Schema.
+// directory embedded in the description. Batch remains disabled. It satisfies
+// tool.AgentDirectoryAwareTool so the schema follows the live agent catalog on
+// each rebuild. An empty directory yields the same result as Schema.
 func (t *AgentTool) SchemaWithAgentDirectory(agentDirectory string) core.ToolSchema {
-	return agentSchema(agentDirectory)
+	return agentSchema(agentDirectory, false)
+}
+
+// SchemaWithOptions returns the Agent schema with both the agent directory and
+// batch-enabled flag applied. It satisfies tool.BatchAwareTool and is the
+// primary schema builder used by GetToolSchemasWith.
+func (t *AgentTool) SchemaWithOptions(agentDirectory string, batchEnabled bool) core.ToolSchema {
+	return agentSchema(agentDirectory, batchEnabled)
 }
 
 // agentSchema builds the Agent tool schema with the given agent-directory body
 // embedded directly in the description. The directory is rendered before the
 // usage notes so the LLM sees the available agent names right after the
 // opening line.
-func agentSchema(agentDirectory string) core.ToolSchema {
+func agentSchema(agentDirectory string, batchEnabled bool) core.ToolSchema {
 	agentDirectory = strings.TrimSpace(agentDirectory)
 
 	var sb strings.Builder
@@ -41,21 +49,24 @@ func agentSchema(agentDirectory string) core.ToolSchema {
 		sb.WriteString("\n\n")
 	}
 	sb.WriteString("Brief the agent with all context it needs: the goal, relevant paths, constraints, and what is already known. Use explore for read-only investigation and edit for file changes.\n\n")
+	if batchEnabled {
+		sb.WriteString("Use tasks[] for genuinely independent semantic work in one call. Provide shared context once; each task contains only its specific delta. Do not batch tasks that depend on each other's semantic results — sequence those instead. tasks[] = parallel reasoning; use Batch for deterministic shell commands.\n\n")
+	}
 	sb.WriteString("Launch independent agents concurrently. Use background mode only for work that does not block your next step. Verify the result before reporting it.")
 
+	params := buildAgentToolParameters(batchEnabled)
 	return core.ToolSchema{
 		Name:        "Agent",
 		Description: sb.String(),
-		Definition:  agentToolParameters,
+		Definition:  params,
 	}
 }
 
-var agentToolParameters = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
+func buildAgentToolParameters(batchEnabled bool) map[string]any {
+	props := map[string]any{
 		"prompt": map[string]any{
 			"type":        "string",
-			"description": "The task for the agent to perform",
+			"description": "The task for the agent to perform (single-agent mode; omit when using tasks[])",
 		},
 		"description": map[string]any{
 			"type":        "string",
@@ -78,8 +89,46 @@ var agentToolParameters = map[string]any{
 			"description": "Permission mode for the spawned agent: explore = read-only; edit = can modify files; default = use the named definition's configured mode, or inherit the parent session when name is empty.",
 			"enum":        []string{"explore", "edit", "default"},
 		},
-	},
-	"required": []string{"description", "prompt"},
+	}
+
+	if batchEnabled {
+		props["context"] = map[string]any{
+			"type":        "string",
+			"description": "Shared context sent to all agents in the batch: goal, constraints, architecture, contract. Keep concise. Required when tasks[] is used.",
+		}
+		props["tasks"] = map[string]any{
+			"type":        "array",
+			"description": "Batch of independent semantic tasks to execute concurrently. When present, context is required and prompt/name/mode/run_in_background are ignored.",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "Agent to use (e.g. explore, worker). Defaults to a general agent if omitted.",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Display label for this task.",
+					},
+					"task": map[string]any{
+						"type":        "string",
+						"description": "Task-specific prompt delta. The shared context is prepended automatically.",
+					},
+					"mode": map[string]any{
+						"type":        "string",
+						"description": "Permission mode override: explore or edit.",
+						"enum":        []string{"explore", "edit", "default"},
+					},
+				},
+				"required": []string{"task"},
+			},
+		}
+	}
+
+	return map[string]any{
+		"type":       "object",
+		"properties": props,
+	}
 }
 
 // Schema returns the model-facing tool definition for AgentStop.

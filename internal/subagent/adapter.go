@@ -10,11 +10,24 @@ import (
 // ExecutorAdapter adapts the Executor to implement tool.AgentExecutor
 type ExecutorAdapter struct {
 	*Executor
+	outputDir       string
+	planModeChecker tool.PlanModeChecker
 }
 
 // NewExecutorAdapter creates a new adapter for the Executor
 func NewExecutorAdapter(executor *Executor) *ExecutorAdapter {
 	return &ExecutorAdapter{Executor: executor}
+}
+
+// SetOutputDir configures the directory used to store large batch results.
+// Matches the pattern used by other tools that write to task.Manager.outputDir.
+func (a *ExecutorAdapter) SetOutputDir(dir string) {
+	a.outputDir = dir
+}
+
+// SetPlanModeChecker wires the Plan Mode check used by RunBatch.
+func (a *ExecutorAdapter) SetPlanModeChecker(c tool.PlanModeChecker) {
+	a.planModeChecker = c
 }
 
 // Verify ExecutorAdapter implements tool.AgentExecutor
@@ -44,6 +57,13 @@ func (a *ExecutorAdapter) Run(ctx context.Context, req tool.AgentExecRequest) (*
 		Activity:          result.Activity,
 		Error:             result.Error,
 	}, nil
+}
+
+// RunBatch executes multiple independent agents concurrently and returns
+// compact combined results. Delegates to Executor.RunBatch with the wired
+// outputDir and planModeChecker.
+func (a *ExecutorAdapter) RunBatch(ctx context.Context, req tool.AgentBatchRequest) (*tool.AgentBatchResult, error) {
+	return a.Executor.RunBatch(ctx, req, a.outputDir, a.planModeChecker)
 }
 
 // RunBackground executes an agent in background

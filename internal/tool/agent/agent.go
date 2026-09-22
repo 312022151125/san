@@ -143,6 +143,11 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any, cwd stri
 func (t *AgentTool) execute(ctx context.Context, params map[string]any, cwd string) toolresult.ToolResult {
 	start := time.Now()
 
+	// Batch invocation: tasks[] present → fan out multiple agents concurrently.
+	if rawTasks, ok := params["tasks"]; ok && rawTasks != nil {
+		return t.executeBatch(ctx, params, start)
+	}
+
 	agentName := tool.GetString(params, "name")
 
 	prompt := tool.GetString(params, "prompt")
@@ -292,6 +297,63 @@ func buildAgentHookResponse(result *tool.AgentExecResult, agentName, prompt stri
 		"usage": map[string]any{
 			"total_input_tokens":  result.TotalInputTokens,
 			"total_output_tokens": result.TotalOutputTokens,
+		},
+	}
+}
+
+// executeBatch handles the tasks[] batch invocation path.
+func (t *AgentTool) executeBatch(ctx context.Context, params map[string]any, start time.Time) toolresult.ToolResult {
+	if t.executor == nil {
+		return toolresult.NewErrorResult(t.Name(), "agent executor not configured")
+	}
+
+	batchCtx := tool.GetString(params, "context")
+
+	rawTasks, _ := params["tasks"].([]any)
+	if len(rawTasks) == 0 {
+		return toolresult.NewErrorResult(t.Name(), "tasks[] must be a non-empty array")
+	}
+
+	items := make([]tool.AgentBatchItem, 0, len(rawTasks))
+	for i, raw := range rawTasks {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return toolresult.NewErrorResult(t.Name(), fmt.Sprintf("tasks[%d]: must be an object", i))
+		}
+		taskPrompt := tool.GetString(m, "task")
+		if taskPrompt == "" {
+			return toolresult.NewErrorResult(t.Name(), fmt.Sprintf("tasks[%d]: task is required", i))
+		}
+		items = append(items, tool.AgentBatchItem{
+			ID:    tool.GetString(m, "id"),
+			Name:  tool.GetString(m, "name"),
+			Agent: tool.GetString(m, "agent"),
+			Task:  taskPrompt,
+			Mode:  tool.GetString(m, "mode"),
+		})
+	}
+
+	req := tool.AgentBatchRequest{
+		Context: batchCtx,
+		Tasks:   items,
+	}
+
+	batchResult, err := t.executor.RunBatch(ctx, req)
+	if err != nil {
+		return toolresult.NewErrorResult(t.Name(), fmt.Sprintf("batch failed: %v", err))
+	}
+
+	duration := time.Since(start)
+	output := formatBatchResult(batchResult)
+
+	return toolresult.ToolResult{
+		Success: true,
+		Output:  output,
+		Metadata: toolresult.ResultMetadata{
+			Title:    t.Name(),
+			Icon:     t.Icon(),
+			Subtitle: fmt.Sprintf("batch: %d agents, %s", len(batchResult.Results), toolresult.FormatDuration(duration)),
+			Duration: duration,
 		},
 	}
 }

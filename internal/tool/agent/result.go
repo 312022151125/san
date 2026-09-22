@@ -14,6 +14,58 @@ import (
 // LLM only needs enough of the tail to sanity-check what the agent did.
 const maxResultActivityLines = 30
 
+// formatBatchResult renders a compact combined result for an Agent batch call.
+// It never includes individual activity traces — those would inflate parent
+// context with noise. Each agent gets a compact block:
+//
+//	Agent: <name>  Model: <model>  Steps: N  Tokens: in=X out=Y  Duration: T
+//	<content or ResultRef>
+func formatBatchResult(batch *tool.AgentBatchResult) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Batch completed: %d agents in %s\n\n", len(batch.Results), toolresult.FormatDuration(batch.Duration))
+
+	for i, r := range batch.Results {
+		name := r.AgentName
+		if name == "" {
+			name = r.AgentID
+		}
+		if name == "" {
+			name = fmt.Sprintf("agent-%d", i+1)
+		}
+
+		status := "done"
+		if !r.Success {
+			status = "failed"
+		}
+
+		fmt.Fprintf(&sb, "--- %s (%s) ---\n", name, status)
+		fmt.Fprintf(&sb, "Model: %s  Steps: %d  Tokens: in=%d out=%d  Duration: %s\n",
+			r.Model, r.StepCount,
+			r.TotalInputTokens, r.TotalOutputTokens,
+			toolresult.FormatDuration(r.Duration),
+		)
+
+		if r.ResultRef != "" {
+			// Large result stored to file — inline only the first snippet.
+			fmt.Fprintf(&sb, "Result: %s\n", r.ResultRef)
+			if r.Content != "" {
+				sb.WriteString(r.Content)
+				sb.WriteString("\n")
+			}
+		} else if r.Content != "" {
+			sb.WriteString(r.Content)
+			sb.WriteString("\n")
+		}
+
+		if !r.Success && r.Error != "" {
+			fmt.Fprintf(&sb, "Error: %s\n", r.Error)
+		}
+
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // formatForegroundAgentResult renders a finished subagent's result for the
 // parent's tool result: a short header, a capped tail of the tool trace, then
 // the subagent's final message.

@@ -12,6 +12,7 @@ type recordingExecutor struct {
 	configOK          bool
 	resolvedConfig    any
 	runReq            tool.AgentExecRequest
+	batchReq          tool.AgentBatchRequest
 }
 
 func (e *recordingExecutor) Run(_ context.Context, req tool.AgentExecRequest) (*tool.AgentExecResult, error) {
@@ -21,6 +22,19 @@ func (e *recordingExecutor) Run(_ context.Context, req tool.AgentExecRequest) (*
 func (e *recordingExecutor) RunBackground(req tool.AgentExecRequest) (tool.AgentTaskInfo, error) {
 	e.runReq = req
 	return tool.AgentTaskInfo{TaskID: "task-1", AgentName: req.Agent}, nil
+}
+func (e *recordingExecutor) RunBatch(_ context.Context, req tool.AgentBatchRequest) (*tool.AgentBatchResult, error) {
+	e.batchReq = req
+	results := make([]tool.AgentExecResult, len(req.Tasks))
+	for i, item := range req.Tasks {
+		results[i] = tool.AgentExecResult{
+			AgentID:   item.ID,
+			AgentName: item.Name,
+			Success:   true,
+			Content:   "done",
+		}
+	}
+	return &tool.AgentBatchResult{Results: results}, nil
 }
 func (e *recordingExecutor) GetAgentConfig(name string) (tool.AgentConfigInfo, bool) {
 	e.selectedAgentName = name

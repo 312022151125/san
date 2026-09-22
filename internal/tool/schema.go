@@ -50,6 +50,11 @@ type SchemaOptions struct {
 	MCPTools       func() []core.ToolSchema
 	AgentDirectory func() string
 
+	// BatchEnabled controls whether the Agent tool exposes batch-mode
+	// parameters (tasks[], context). When false those fields are absent from
+	// the schema — zero token overhead for projects that do not use batching.
+	BatchEnabled bool
+
 	// ExtraTools are caller-supplied schemas appended to the registered set —
 	// the hook for conditionally-present tools whose schema the caller builds
 	// (e.g. the self-learning Evolve trigger, built by tool/evolve.Schema and
@@ -131,6 +136,13 @@ func GetToolSchemasWith(opts SchemaOptions) []core.ToolSchema {
 			// entry is a registered tool (enforced by
 			// TestBuiltinToolsAllRegistered). Skip defensively rather than
 			// nil-panic should a build ever drop one.
+			continue
+		}
+		// BatchAwareTool (currently only AgentTool) embeds both the agent
+		// directory and the batch-enabled flag. Check it first so both bits
+		// of dynamic content are applied in one call.
+		if ba, ok := t.(BatchAwareTool); ok {
+			tools = append(tools, ba.SchemaWithOptions(agentDirectory, opts.BatchEnabled))
 			continue
 		}
 		if agentDirectory != "" {

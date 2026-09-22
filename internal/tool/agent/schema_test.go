@@ -8,7 +8,7 @@ import (
 func TestAgentSchemaEmbedsDirectory(t *testing.T) {
 	directory := "Available agents for the Agent tool:\n\n- project-reviewer: General multi-step review agent\n  Tools: Read, Bash(git diff*)\n- plugin:browser-user: Uses a browser\n  Tools: WebFetch"
 
-	schema := agentSchema(directory)
+	schema := agentSchema(directory, false)
 	if !strings.Contains(schema.Description, "project-reviewer") {
 		t.Error("Agent description should embed the directory body when supplied")
 	}
@@ -21,7 +21,7 @@ func TestAgentSchemaEmbedsDirectory(t *testing.T) {
 }
 
 func TestAgentSchemaOmitsDirectoryWhenEmpty(t *testing.T) {
-	schema := agentSchema("")
+	schema := agentSchema("", false)
 	if strings.Contains(schema.Description, "Available agent definitions") {
 		t.Error("empty directory should not produce an available-agents block")
 	}
@@ -35,16 +35,16 @@ func TestAgentSchemaOmitsDirectoryWhenEmpty(t *testing.T) {
 // (Schema) and its zero-directory form (SchemaWithAgentDirectory) can't drift.
 func TestAgentToolSchemaMatchesEmptyDirectory(t *testing.T) {
 	at := &AgentTool{}
-	if at.Schema().Description != agentSchema("").Description {
+	if at.Schema().Description != agentSchema("", false).Description {
 		t.Error("AgentTool.Schema must equal the directory-less agentSchema")
 	}
-	if at.SchemaWithAgentDirectory("").Description != agentSchema("").Description {
+	if at.SchemaWithAgentDirectory("").Description != agentSchema("", false).Description {
 		t.Error("SchemaWithAgentDirectory(\"\") must equal the directory-less agentSchema")
 	}
 }
 
 func TestAgentSchemaEncouragesDirectWorkForClearScope(t *testing.T) {
-	description := agentSchema("").Description
+	description := agentSchema("", false).Description
 	for _, want := range []string{
 		"separate context or parallel execution materially helps",
 		"Handle clear, bounded work directly",
@@ -57,7 +57,7 @@ func TestAgentSchemaEncouragesDirectWorkForClearScope(t *testing.T) {
 }
 
 func TestAgentSchemaRetainsDelegationGuidance(t *testing.T) {
-	description := agentSchema("").Description
+	description := agentSchema("", false).Description
 	for _, want := range []string{
 		"all context it needs",
 		"Use explore for read-only investigation and edit for file changes",
@@ -71,8 +71,36 @@ func TestAgentSchemaRetainsDelegationGuidance(t *testing.T) {
 	}
 }
 
+func TestAgentSchemaBatchFieldsOmittedWhenDisabled(t *testing.T) {
+	schema := agentSchema("", false)
+	params := schema.Definition.(map[string]any)
+	props := params["properties"].(map[string]any)
+	if _, ok := props["tasks"]; ok {
+		t.Error("tasks[] must not appear in schema when batch is disabled")
+	}
+	if _, ok := props["context"]; ok {
+		t.Error("context must not appear in schema when batch is disabled")
+	}
+}
+
+func TestAgentSchemaBatchFieldsPresentWhenEnabled(t *testing.T) {
+	schema := agentSchema("", true)
+	params := schema.Definition.(map[string]any)
+	props := params["properties"].(map[string]any)
+	if _, ok := props["tasks"]; !ok {
+		t.Error("tasks[] must appear in schema when batch is enabled")
+	}
+	if _, ok := props["context"]; !ok {
+		t.Error("context must appear in schema when batch is enabled")
+	}
+	if !strings.Contains(schema.Description, "tasks[]") {
+		t.Error("batch guidance should appear in description when enabled")
+	}
+}
+
 func TestAgentSchemaExplainsNameResolution(t *testing.T) {
-	properties := agentToolParameters["properties"].(map[string]any)
+	params := buildAgentToolParameters(false)
+	properties := params["properties"].(map[string]any)
 	name, ok := properties["name"].(map[string]any)
 	if !ok {
 		t.Fatal("Agent schema should expose name")
@@ -84,7 +112,8 @@ func TestAgentSchemaExplainsNameResolution(t *testing.T) {
 }
 
 func TestAgentSchemaModeEnumExcludesBypass(t *testing.T) {
-	properties := agentToolParameters["properties"].(map[string]any)
+	params := buildAgentToolParameters(false)
+	properties := params["properties"].(map[string]any)
 	mode := properties["mode"].(map[string]any)
 	enum := mode["enum"].([]string)
 	want := []string{"explore", "edit", "default"}
@@ -94,7 +123,8 @@ func TestAgentSchemaModeEnumExcludesBypass(t *testing.T) {
 }
 
 func TestAgentSchemaOmitsModelOverride(t *testing.T) {
-	properties := agentToolParameters["properties"].(map[string]any)
+	params := buildAgentToolParameters(false)
+	properties := params["properties"].(map[string]any)
 	if _, ok := properties["model"]; ok {
 		t.Fatal("Agent schema should not expose a model override")
 	}

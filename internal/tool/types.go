@@ -42,6 +42,17 @@ type AgentDirectoryAwareTool interface {
 	SchemaWithAgentDirectory(agentDirectory string) core.ToolSchema
 }
 
+// BatchAwareTool is an optional interface for a tool whose schema includes
+// batch-mode parameters (tasks[], context) only when batch execution is enabled.
+// Keeping batch fields out of the schema when disabled saves token overhead.
+type BatchAwareTool interface {
+	Tool
+
+	// SchemaWithOptions returns the schema with the batch-enabled flag applied.
+	// When batchEnabled is false the schema must omit tasks[] and context.
+	SchemaWithOptions(agentDirectory string, batchEnabled bool) core.ToolSchema
+}
+
 // PermissionAwareTool is a tool that requires user permission before execution
 type PermissionAwareTool interface {
 	Tool
