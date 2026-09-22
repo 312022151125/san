@@ -154,9 +154,7 @@ func (m *model) maybeAutoRetain(result core.Result) tea.Cmd {
 	if request == "" {
 		return nil
 	}
-	digest := fmt.Sprintf("[task] %s\n\n[outcome] %s",
-		hindsight.TruncateRunes(request, retainRequestChars),
-		hindsight.TruncateRunes(answer, retainAnswerChars))
+	digest := retainDigest(request, answer)
 
 	// Skip an unchanged digest (autopilot chains can end several turns on
 	// the same request+answer pair).
@@ -186,6 +184,15 @@ func (m *model) maybeAutoRetain(result core.Result) tea.Cmd {
 		}
 		return autoRetainDoneMsg{digest: digest}
 	}
+}
+
+// retainDigest consolidates a task into the single durable fact auto-retain
+// stores: the request plus the trimmed outcome, each capped. Shared with
+// tests so the digest-dedupe assertion cannot drift from production.
+func retainDigest(request, answer string) string {
+	return fmt.Sprintf("[task] %s\n\n[outcome] %s",
+		hindsight.TruncateRunes(request, retainRequestChars),
+		hindsight.TruncateRunes(answer, retainAnswerChars))
 }
 
 // lastHumanRequest returns the most recent plain user request (tool results

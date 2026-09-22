@@ -15,6 +15,9 @@ const (
 	ProviderTavily ProviderName = "tavily"
 	ProviderSerper ProviderName = "serper"
 	ProviderBrave  ProviderName = "brave"
+	// ProviderSearXNG is a self-hosted SearXNG instance (no API key; the
+	// endpoint comes from settings searchUrl or SEARXNG_ENDPOINT).
+	ProviderSearXNG ProviderName = "searxng"
 )
 
 // SearchResult represents a single search result

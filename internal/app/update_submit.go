@@ -210,6 +210,13 @@ func (m *model) adaptTurnForProvider(content string, images []core.Attachment) (
 // leaving queue-edit mode, which releases a drain that drainTurnQueues held
 // during the edit.
 func (m *model) drainInputQueueWhileIdle() tea.Cmd {
+	// While the pre-submit auto-recall defers the current turn, "idle" is a
+	// lie: the deferred message is about to submit, and dispatching a queued
+	// item now would reorder submissions. The queue keeps its item — the next
+	// turn boundary (drainTurnQueues at OnTurnEnd) drains it.
+	if m.autoRecallInFlight {
+		return nil
+	}
 	item, ok := m.userInput.Queue.Dequeue()
 	if !ok {
 		return nil
