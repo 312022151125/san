@@ -38,7 +38,8 @@ func TestManageableToolsIncludeConditionalEvolve(t *testing.T) {
 func TestBuiltinToolsAllRegistered(t *testing.T) {
 	schemas := tool.GetToolSchemas()
 	for _, name := range []string{
-		tool.ToolRead, tool.ToolWebFetch, tool.ToolWebSearch,
+		tool.ToolRead, tool.ToolGrep, tool.ToolGlob,
+		tool.ToolWebFetch, tool.ToolWebSearch,
 		tool.ToolEdit, tool.ToolWrite, tool.ToolBash, tool.ToolAskUserQuestion,
 		tool.ToolSkill, tool.ToolAgent, tool.ToolAgentStop, tool.ToolSendMessage,
 		tool.ToolTaskCreate, tool.ToolTaskGet, tool.ToolTaskUpdate,

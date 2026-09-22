@@ -39,6 +39,8 @@ func IsEditTool(name string) bool {
 
 var readOnlyTools = map[string]bool{
 	"Read":      true,
+	"Grep":      true,
+	"Glob":      true,
 	"WebFetch":  true,
 	"WebSearch": true,
 	"LSP":       true,

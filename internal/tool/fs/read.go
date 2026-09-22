@@ -45,7 +45,72 @@ const (
 	// part of the file — a truncated line cannot be edited by copying the
 	// shortened text.
 	lineTruncationMarker = "… [line truncated]"
+
+	// largeFileThreshold is the line count above which an unconstrained Read
+	// (no offset/limit) returns a head/tail summary instead of streaming all
+	// lines into the context. Explicit offset/limit always bypasses this.
+	largeFileThreshold = 500
+
+	// summaryHead/Tail are the number of lines shown at each end of a
+	// large-file summary. 10 lines each gives enough context to orient
+	// without burning tokens on content the model has not asked for yet.
+	summaryHead = 10
+	summaryTail = 10
 )
+
+// buildSummary returns the hashline head/tail block for a large-file Read.
+// allLines contains every line of the file (0-indexed). The @file header uses
+// the whole-file TAG so Edit anchors on the shown lines are always valid.
+//
+// Output shape:
+//
+//	@file rel/path#TAG
+//	[large file: N lines, X KB — first 10 and last 10 lines shown; use Grep to locate a symbol, then Read with offset+limit]
+//	1#abc|first line
+//	...
+//	10#xyz|tenth line
+//	--- M lines omitted ---
+//	N-9#abc|...
+//	...
+//	N#xyz|last line
+func buildSummary(allLines []string, relPath, fullContent string) string {
+	total := len(allLines)
+	tag := ComputeFileHash(fullContent)
+
+	var b strings.Builder
+	b.WriteString(FormatFileHeader(relPath, tag))
+	b.WriteByte('\n')
+
+	sizeBytes := int64(len(fullContent))
+	b.WriteString(fmt.Sprintf("[large file: %d lines, %s — first %d and last %d lines shown; use Grep to locate a symbol, then Read with offset+limit]\n",
+		total, toolresult.FormatSize(sizeBytes), summaryHead, summaryTail))
+
+	head := summaryHead
+	if head > total {
+		head = total
+	}
+	for i := 0; i < head; i++ {
+		b.WriteString(FormatHashline(i+1, allLines[i]))
+		b.WriteByte('\n')
+	}
+
+	tail := summaryTail
+	tailStart := total - tail
+	if tailStart < head {
+		tailStart = head // no gap needed; just continue from where head left off
+	}
+
+	omitted := tailStart - head
+	if omitted > 0 {
+		b.WriteString(fmt.Sprintf("--- %d lines omitted ---\n", omitted))
+		for i := tailStart; i < total; i++ {
+			b.WriteString(FormatHashline(i+1, allLines[i]))
+			b.WriteByte('\n')
+		}
+	}
+
+	return b.String()
+}
 
 // ReadTool reads file contents
 type ReadTool struct{}
@@ -67,6 +132,14 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 		filePath = filepath.Join(cwd, filePath)
 	}
 
+	// summary_only forces the head/tail summary regardless of file size.
+	summaryOnly := tool.GetBool(params, "summary_only")
+
+	// Track whether offset/limit were explicitly supplied by the caller.
+	// Any explicit window means the caller already knows what they want, so
+	// summary mode is skipped entirely.
+	_, offsetGiven := params["offset"]
+	_, limitGiven := params["limit"]
 	offset := tool.GetInt(params, "offset", 0)
 	limit := tool.GetInt(params, "limit", maxReadLines)
 
@@ -119,16 +192,64 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 		return toolresult.NewErrorResult(t.Name(), "failed to seek file: "+err.Error())
 	}
 
-	// Read lines — use a larger buffer to handle files with very long lines.
-	var lines []toolresult.ContentLine
+	// Read all lines into memory with a large scanner buffer.
+	// We need all lines to (a) check whether to trigger summary mode and
+	// (b) supply the tail window if we do.
+	var allLines []string
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), 1024*1024)
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return toolresult.NewErrorResult(t.Name(), "error reading file: "+err.Error())
+	}
+
+	recordFileRead(filePath, info)
+	duration := time.Since(start)
+
+	// Compute relPath and normalised full content once — used by both the
+	// summary path and the normal hashline path.
+	relPath := filePath
+	if cwd != "" {
+		if rel, relErr := filepath.Rel(cwd, filePath); relErr == nil {
+			relPath = rel
+		}
+	}
+	fullBytes, _ := os.ReadFile(filePath)
+	fullContent := strings.TrimPrefix(string(fullBytes), "\ufeff")
+	fullContent = strings.ReplaceAll(fullContent, "\r\n", "\n")
+
+	// --- Summary mode ---
+	// Triggered when:
+	//   (a) summary_only=true, OR
+	//   (b) file exceeds largeFileThreshold AND no offset/limit was given.
+	wantSummary := summaryOnly || (!offsetGiven && !limitGiven && len(allLines) > largeFileThreshold)
+	if wantSummary {
+		output := buildSummary(allLines, relPath, fullContent)
+		return toolresult.ToolResult{
+			Success: true,
+			Output:  output,
+			Metadata: toolresult.ResultMetadata{
+				Title:     t.Name(),
+				Icon:      t.Icon(),
+				Subtitle:  filePath,
+				Size:      info.Size(),
+				LineCount: len(allLines),
+				Duration:  duration,
+				Truncated: true, // summary is always a partial view
+			},
+		}
+	}
+
+	// --- Normal windowed read ---
+	var lines []toolresult.ContentLine
 	lineNo := 0
 	readCount := 0
 	emittedBytes := 0
 	truncated := false
 
-	for scanner.Scan() {
+	for _, rawText := range allLines {
 		lineNo++
 
 		// Skip lines before offset
@@ -142,8 +263,7 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 			break
 		}
 
-		text := scanner.Text()
-
+		text := rawText
 		// Truncate long lines (rune-aware to avoid splitting multi-byte characters)
 		if utf8.RuneCountInString(text) > maxLineLength {
 			runes := []rune(text)
@@ -159,17 +279,9 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 		emittedBytes += len(text) + 8 // content plus the line-number prefix
 	}
 
-	if err := scanner.Err(); err != nil {
-		return toolresult.NewErrorResult(t.Name(), "error reading file: "+err.Error())
-	}
-
-	recordFileRead(filePath, info)
-
-	duration := time.Since(start)
-
-	// resultNote makes states the line dump alone can't convey visible to
-	// the model: an empty result would render as nothing, and a truncated
-	// read must say where to continue.
+	// resultNote conveys states the line dump alone can't convey: an empty
+	// result would render as nothing, and a truncated read must say where to
+	// continue.
 	resultNote := ""
 	switch {
 	case len(lines) == 0 && lineNo > 0:
@@ -195,27 +307,12 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 	}
 
 	// Always use hashline output format: @file path#TAG header + LINE#hash|content.
-	// Re-read full file content to compute the whole-file TAG so Edit anchors
-	// are valid regardless of the offset/limit window used here.
 	var hlOutput string
 	if len(lines) > 0 {
-		fullBytes, readErr := os.ReadFile(filePath)
-		if readErr == nil {
-			// Normalise to the same form that Edit's prepareEditContent uses
-			// (strip BOM, CRLF→LF) so the TAG matches what Edit will verify.
-			fullContent := strings.TrimPrefix(string(fullBytes), "\ufeff")
-			fullContent = strings.ReplaceAll(fullContent, "\r\n", "\n")
-			relPath := filePath
-			if cwd != "" {
-				if rel, relErr := filepath.Rel(cwd, filePath); relErr == nil {
-					relPath = rel
-				}
-			}
-			hlOutput = hashlineReadOutput(fullContent, relPath, lines)
-			if truncated {
-				lastLine := lines[len(lines)-1].LineNo
-				hlOutput += fmt.Sprintf("(output truncated at line %d; continue with offset=%d)\n", lastLine, lastLine+1)
-			}
+		hlOutput = hashlineReadOutput(fullContent, relPath, lines)
+		if truncated {
+			lastLine := lines[len(lines)-1].LineNo
+			hlOutput += fmt.Sprintf("(output truncated at line %d; continue with offset=%d)\n", lastLine, lastLine+1)
 		}
 	}
 

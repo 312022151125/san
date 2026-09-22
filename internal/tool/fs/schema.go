@@ -22,7 +22,11 @@ lines in "LINE#hash|content" format. Supply file_tag and LINE#hash anchors to Ed
 - Lines over %d characters end with "%s" and cannot be used as Edit anchors
 - The file tag covers the entire file even when offset/limit are used, so anchors are always valid
 - Do not re-read a file solely to verify your own Edit/Write — a failed change errors; successful results keep your view current
-- Image files are recognized but cannot be displayed yet; ask the user to attach the image to a message instead`, maxReadLines, maxLineLength, lineTruncationMarker),
+- Image files are recognized but cannot be displayed yet; ask the user to attach the image to a message instead
+
+Large-file workflow: files over %d lines are automatically returned as a head/tail summary
+(first %d lines + last %d lines) when no offset/limit is given. To find a specific symbol,
+use Grep first, then Read with offset+limit to get the relevant window.`, maxReadLines, maxLineLength, lineTruncationMarker, largeFileThreshold, summaryHead, summaryTail),
 		Definition: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -32,11 +36,15 @@ lines in "LINE#hash|content" format. Supply file_tag and LINE#hash anchors to Ed
 				},
 				"offset": map[string]any{
 					"type":        "integer",
-					"description": "The line number to start reading from (1-based). Only provide if the file is too large to read at once.",
+					"description": "The line number to start reading from (1-based). Providing offset bypasses large-file summary mode.",
 				},
 				"limit": map[string]any{
 					"type":        "integer",
-					"description": "The number of lines to read. Only provide if the file is too large to read at once.",
+					"description": "The number of lines to read. Providing limit bypasses large-file summary mode.",
+				},
+				"summary_only": map[string]any{
+					"type":        "boolean",
+					"description": "When true, always return the head/tail summary regardless of file size. Useful for quick orientation before using Grep.",
 				},
 			},
 			"required": []string{"file_path"},

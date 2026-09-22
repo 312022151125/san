@@ -546,3 +546,216 @@ func TestEdit_RequiresObservedView(t *testing.T) {
 		t.Errorf("error should instruct to read first, got: %q", result.Error)
 	}
 }
+
+// --- Smart Read (large-file head/tail summary) tests ---
+
+// TestSmartRead_SummaryTriggeredForLargeFile verifies that a file above
+// largeFileThreshold lines returns a summary when no offset/limit is given.
+func TestSmartRead_SummaryTriggeredForLargeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "big.txt")
+
+	var sb strings.Builder
+	total := largeFileThreshold + 50 // clearly over threshold
+	for i := 1; i <= total; i++ {
+		fmt.Fprintf(&sb, "line%d\n", i)
+	}
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path": filePath,
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("read failed: %s", result.Error)
+	}
+
+	out := result.FormatForLLM()
+
+	// Must contain the @file header.
+	if !strings.HasPrefix(out, "@file ") {
+		t.Errorf("summary missing @file header: %q", out[:min(60, len(out))])
+	}
+	// Must contain the large-file annotation.
+	if !strings.Contains(out, "large file:") {
+		t.Errorf("summary missing 'large file:' annotation, got:\n%s", out[:min(200, len(out))])
+	}
+	// Must contain the omission banner.
+	if !strings.Contains(out, "lines omitted") {
+		t.Errorf("summary missing 'lines omitted' banner, got:\n%s", out[:min(200, len(out))])
+	}
+	// Metadata must be marked truncated.
+	if !result.Metadata.Truncated {
+		t.Error("summary result should set Metadata.Truncated=true")
+	}
+	// LineCount should reflect total file lines, not just the window.
+	if result.Metadata.LineCount != total {
+		t.Errorf("LineCount = %d, want %d", result.Metadata.LineCount, total)
+	}
+}
+
+// TestSmartRead_SummaryNotTriggeredWhenOffsetGiven verifies that an explicit
+// offset bypasses summary mode and returns the normal windowed output.
+func TestSmartRead_SummaryNotTriggeredWhenOffsetGiven(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "big.txt")
+
+	var sb strings.Builder
+	for i := 1; i <= largeFileThreshold+100; i++ {
+		fmt.Fprintf(&sb, "line%d\n", i)
+	}
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path": filePath,
+		"offset":    float64(10),
+		"limit":     float64(5),
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("read failed: %s", result.Error)
+	}
+	out := result.FormatForLLM()
+	if strings.Contains(out, "large file:") {
+		t.Error("summary mode must not trigger when offset is given")
+	}
+	if len(result.Lines) != 5 {
+		t.Errorf("expected 5 lines, got %d", len(result.Lines))
+	}
+}
+
+// TestSmartRead_SummaryNotTriggeredWhenLimitGiven verifies that an explicit
+// limit bypasses summary mode.
+func TestSmartRead_SummaryNotTriggeredWhenLimitGiven(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "big.txt")
+
+	var sb strings.Builder
+	for i := 1; i <= largeFileThreshold+100; i++ {
+		fmt.Fprintf(&sb, "line%d\n", i)
+	}
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path": filePath,
+		"limit":     float64(20),
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("read failed: %s", result.Error)
+	}
+	out := result.FormatForLLM()
+	if strings.Contains(out, "large file:") {
+		t.Error("summary mode must not trigger when limit is given")
+	}
+	if len(result.Lines) != 20 {
+		t.Errorf("expected 20 lines, got %d", len(result.Lines))
+	}
+}
+
+// TestSmartRead_SummaryOnlyForcesSmallFile verifies that summary_only=true
+// forces the head/tail format even for a small file (below threshold).
+func TestSmartRead_SummaryOnlyForcesSmallFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "small.txt")
+
+	var sb strings.Builder
+	for i := 1; i <= 30; i++ { // well below largeFileThreshold
+		fmt.Fprintf(&sb, "line%d\n", i)
+	}
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path":    filePath,
+		"summary_only": true,
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("read failed: %s", result.Error)
+	}
+	out := result.FormatForLLM()
+	if !strings.Contains(out, "large file:") {
+		t.Errorf("summary_only=true must produce summary even for small file; got:\n%s", out[:min(300, len(out))])
+	}
+}
+
+// TestSmartRead_SummaryFormat checks the structural correctness of the summary
+// output: @file header with TAG, annotation line, head hashlines, omission
+// banner, tail hashlines.
+func TestSmartRead_SummaryFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "fmt.txt")
+
+	total := largeFileThreshold + 200
+	var sb strings.Builder
+	for i := 1; i <= total; i++ {
+		fmt.Fprintf(&sb, "line%d content\n", i)
+	}
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := (&ReadTool{}).Execute(context.Background(), map[string]any{
+		"file_path": filePath,
+	}, tmpDir)
+	if !result.Success {
+		t.Fatalf("read failed: %s", result.Error)
+	}
+	out := result.FormatForLLM()
+	outLines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	// Line 0: @file header with 4-hex TAG.
+	if !strings.HasPrefix(outLines[0], "@file ") {
+		t.Fatalf("line 0 should be @file header, got %q", outLines[0])
+	}
+	tagIdx := strings.LastIndexByte(outLines[0], '#')
+	if tagIdx < 0 {
+		t.Fatalf("@file header missing '#TAG': %q", outLines[0])
+	}
+	tag := outLines[0][tagIdx+1:]
+	if len(tag) != 4 {
+		t.Errorf("TAG should be 4 chars, got %q", tag)
+	}
+
+	// Line 1: annotation.
+	if !strings.Contains(outLines[1], "large file:") {
+		t.Errorf("line 1 should be the annotation, got %q", outLines[1])
+	}
+
+	// Lines 2..11: head hashlines (1#hash|content through 10#hash|content).
+	for i := 0; i < summaryHead; i++ {
+		lineIdx := 2 + i
+		expected := fmt.Sprintf("%d#", i+1)
+		if !strings.HasPrefix(outLines[lineIdx], expected) {
+			t.Errorf("head line %d: want prefix %q, got %q", lineIdx, expected, outLines[lineIdx])
+		}
+	}
+
+	// After the head there must be exactly one "--- N lines omitted ---" banner.
+	bannerIdx := -1
+	for i, l := range outLines {
+		if strings.Contains(l, "lines omitted") {
+			bannerIdx = i
+			break
+		}
+	}
+	if bannerIdx < 0 {
+		t.Fatal("omission banner not found in summary output")
+	}
+
+	// After the banner there must be exactly summaryTail hashlines.
+	tail := outLines[bannerIdx+1:]
+	if len(tail) != summaryTail {
+		t.Errorf("tail should have %d lines, got %d", summaryTail, len(tail))
+	}
+	// Last tail line should be the last line of the file.
+	lastExpected := fmt.Sprintf("%d#", total)
+	if !strings.HasPrefix(tail[len(tail)-1], lastExpected) {
+		t.Errorf("last tail line should start with %q, got %q", lastExpected, tail[len(tail)-1])
+	}
+}
+

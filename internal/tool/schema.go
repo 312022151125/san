@@ -5,6 +5,8 @@ import "github.com/genai-io/san/internal/core"
 // Tool name constants used in runtime comparisons across the codebase.
 const (
 	ToolRead      = "Read"
+	ToolGrep      = "Grep"
+	ToolGlob      = "Glob"
 	ToolWebFetch  = "WebFetch"
 	ToolWebSearch = "WebSearch"
 	ToolEdit      = "Edit"
@@ -59,7 +61,7 @@ type SchemaOptions struct {
 // than skipped at runtime. TestBuiltinOrderCoversEveryRegisteredTool guards
 // the reverse: a registered tool must not be missing from this order.
 var builtinToolOrder = []string{
-	ToolRead, ToolWebFetch, ToolWebSearch, ToolEdit, ToolWrite, ToolBash, ToolAskUserQuestion,
+	ToolRead, ToolGrep, ToolGlob, ToolWebFetch, ToolWebSearch, ToolEdit, ToolWrite, ToolBash, ToolAskUserQuestion,
 	ToolSkill,
 	ToolAgent, ToolAgentStop, ToolSendMessage,
 	ToolTaskCreate, ToolTaskGet, ToolTaskUpdate,
