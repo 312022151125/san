@@ -76,6 +76,56 @@ type Data struct {
 	// Example settings.json:
 	//   "agents": { "advisor": { "model": "anthropic/claude-opus-4-7" } }
 	Agents AgentModelSettings `json:"agents,omitempty"`
+
+	// Subagents tunes background-agent concurrency limits. Both fields default
+	// to the executor's compiled-in safe values when absent or zero.
+	//
+	// Example settings.json:
+	//   "subagents": { "maxConcurrency": 5, "maxWriters": 2 }
+	Subagents SubagentSettings `json:"subagents,omitempty"`
+}
+
+// SubagentSettings controls how many background agents may run in parallel.
+type SubagentSettings struct {
+	// MaxConcurrency is the total number of concurrent background agents.
+	// 0 or absent means use the executor's compiled-in default (3).
+	// Must be ≥ MaxWriters when both are set.
+	MaxConcurrency int `json:"maxConcurrency,omitempty"`
+
+	// MaxWriters is the maximum number of concurrent write-permitted background
+	// agents (PermissionMode != explore). 0 or absent means use the
+	// executor's compiled-in default (1).
+	MaxWriters int `json:"maxWriters,omitempty"`
+}
+
+// ResolvedMaxConcurrency returns the configured value, or the default when unset.
+func (s SubagentSettings) ResolvedMaxConcurrency(defaultVal int) int {
+	if s.MaxConcurrency > 0 {
+		return s.MaxConcurrency
+	}
+	return defaultVal
+}
+
+// ResolvedMaxWriters returns the configured value, or the default when unset.
+func (s SubagentSettings) ResolvedMaxWriters(defaultVal int) int {
+	if s.MaxWriters > 0 {
+		return s.MaxWriters
+	}
+	return defaultVal
+}
+
+// Validate checks cross-field invariants. Returns nil when valid.
+func (s SubagentSettings) Validate() error {
+	if s.MaxConcurrency < 0 {
+		return fmt.Errorf("subagents.maxConcurrency must be ≥ 0 (got %d)", s.MaxConcurrency)
+	}
+	if s.MaxWriters < 0 {
+		return fmt.Errorf("subagents.maxWriters must be ≥ 0 (got %d)", s.MaxWriters)
+	}
+	if s.MaxConcurrency > 0 && s.MaxWriters > 0 && s.MaxWriters > s.MaxConcurrency {
+		return fmt.Errorf("subagents.maxWriters (%d) cannot exceed maxConcurrency (%d)", s.MaxWriters, s.MaxConcurrency)
+	}
+	return nil
 }
 
 // AgentModelEntry holds the model override for one agent. Additional
@@ -789,6 +839,7 @@ func (s *Data) Clone() *Data {
 			dst.Agents[k] = v
 		}
 	}
+	dst.Subagents = s.Subagents // value type; shallow copy is correct
 	if s.AllowBypass != nil {
 		v := *s.AllowBypass
 		dst.AllowBypass = &v

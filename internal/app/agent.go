@@ -765,9 +765,14 @@ func (m *model) ReconfigureAgentTool() {
 	executor.SetSkillsDirectory(m.services.Skill.PromptSection())
 	executor.SetMCPDependencies(m.services.MCP, m.services.MCP)
 	executor.SetDisabledTools(m.services.Setting.DisabledTools())
-	for name, entry := range m.services.Setting.Snapshot().Agents {
+	snap := m.services.Setting.Snapshot()
+	for name, entry := range snap.Agents {
 		executor.SetModelOverride(name, entry.Model)
 	}
+	executor.SetConcurrencyLimits(
+		snap.Subagents.ResolvedMaxConcurrency(0),
+		snap.Subagents.ResolvedMaxWriters(0),
+	)
 
 	adapter := subagent.NewExecutorAdapter(executor)
 	type executorSetter interface{ SetExecutor(tool.AgentExecutor) }

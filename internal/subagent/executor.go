@@ -24,14 +24,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// maxBackgroundConcurrency is the maximum number of background agent goroutines
-// that may run in parallel across the whole executor.
-const maxBackgroundConcurrency = 3
+// defaultMaxBackgroundConcurrency is the compiled-in default for the total
+// number of concurrent background agent goroutines. Overridden at runtime via
+// SetConcurrencyLimits when the user configures subagents.maxConcurrency.
+const defaultMaxBackgroundConcurrency = 3
 
-// maxBackgroundWriters is the maximum number of those goroutines that may hold
-// write permissions (PermissionMode != PermissionExplore) simultaneously.
-// Read-only agents (explore, advisor, reviewer) are not limited by this cap.
-const maxBackgroundWriters = 1
+// defaultMaxBackgroundWriters is the compiled-in default for the maximum number
+// of concurrent write-permitted background agents. Overridden at runtime via
+// SetConcurrencyLimits when the user configures subagents.maxWriters.
+const defaultMaxBackgroundWriters = 1
 
 // ProviderResolver turns a vendor name into a live provider so a subagent can
 // run on a different vendor than its parent. The app wires an *llm.ProviderPool;
@@ -112,9 +113,30 @@ func NewExecutor(llmProvider llm.Provider, cwd string, parentModelID string, hoo
 		cwd:            cwd,
 		parentModelID:  parentModelID,
 		hooks:          hookEngine,
-		concurrencySem: make(chan struct{}, maxBackgroundConcurrency),
-		writerSem:      make(chan struct{}, maxBackgroundWriters),
+		concurrencySem: make(chan struct{}, defaultMaxBackgroundConcurrency),
+		writerSem:      make(chan struct{}, defaultMaxBackgroundWriters),
 	}
+}
+
+// SetConcurrencyLimits resizes the background-agent semaphores to the given
+// capacities. It replaces both channels atomically under no lock — it must be
+// called before any RunBackground invocation (i.e. during executor setup, not
+// during a live run). concurrency is the total concurrent cap; writers is the
+// cap for write-permitted agents. Either value ≤ 0 keeps the compiled-in
+// default.
+func (e *Executor) SetConcurrencyLimits(concurrency, writers int) {
+	if concurrency <= 0 {
+		concurrency = defaultMaxBackgroundConcurrency
+	}
+	if writers <= 0 {
+		writers = defaultMaxBackgroundWriters
+	}
+	// Clamp: writers can never exceed the total concurrency cap.
+	if writers > concurrency {
+		writers = concurrency
+	}
+	e.concurrencySem = make(chan struct{}, concurrency)
+	e.writerSem = make(chan struct{}, writers)
 }
 
 // SetParentPermissionMode provides the parent session's live permission mode.

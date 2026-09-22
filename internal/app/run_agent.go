@@ -70,6 +70,10 @@ func RunAgent(opts AgentRunOptions) error {
 		for name, entry := range s.Agents {
 			executor.SetModelOverride(name, entry.Model)
 		}
+		executor.SetConcurrencyLimits(
+			s.Subagents.ResolvedMaxConcurrency(0),
+			s.Subagents.ResolvedMaxWriters(0),
+		)
 	}
 
 	if opts.Name != "" {

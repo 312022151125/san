@@ -323,6 +323,14 @@ func UpdateAgentModelAt(name, model string, userLevel bool) error {
 	})
 }
 
+// UpdateSubagentsAt persists the subagent concurrency settings at the requested
+// settings level, rewriting only the subagents block. The TUI /config Subagents
+// panel calls this; zero values are stored as omitempty and resolve to the
+// compiled-in defaults at runtime.
+func UpdateSubagentsAt(cfg SubagentSettings, userLevel bool) error {
+	return updateSettingsFile(userLevel, func(d *Data) { d.Subagents = cfg })
+}
+
 // migrateAdvisorField moves a populated legacy top-level "advisor.model" value
 // into the new "agents" map and clears the old field. Called once per Load so
 // users who had the old key in settings.json don't lose their configuration.

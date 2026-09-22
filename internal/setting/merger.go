@@ -27,6 +27,7 @@ func mergeSettings(base, overlay *Data) *Data {
 	result.SelfLearn = mergeSelfLearn(base.SelfLearn, overlay.SelfLearn)
 	result.AutoPilot = mergeAutoPilot(base.AutoPilot, overlay.AutoPilot)
 	result.Agents = mergeAgents(base.Agents, overlay.Agents)
+	result.Subagents = mergeSubagents(base.Subagents, overlay.Subagents)
 	result.LastOperationMode = coalesce(overlay.LastOperationMode, base.LastOperationMode)
 
 	return result
@@ -71,6 +72,16 @@ func ApplyPersonaOverlay(base, overlay *Data) *Data {
 	ov := overlay.Clone()
 	ov.Persona = ""
 	return mergeSettings(base, ov)
+}
+
+// mergeSubagents does a field-level merge: non-zero overlay values win over
+// base. Zero means "unset", which resolves to the compiled-in default at
+// runtime; it must never override a non-zero base value set at a lower layer.
+func mergeSubagents(base, overlay SubagentSettings) SubagentSettings {
+	return SubagentSettings{
+		MaxConcurrency: coalesceInt(overlay.MaxConcurrency, base.MaxConcurrency),
+		MaxWriters:     coalesceInt(overlay.MaxWriters, base.MaxWriters),
+	}
 }
 
 // mergeAgents merges two AgentModelSettings maps: for each agent name present
