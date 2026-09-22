@@ -35,6 +35,9 @@ func Initialize(opts Options) error {
 	// Built-in agents register first so any user- or project-level definition
 	// with the same name overrides them (LoadAgents runs after this).
 	defaultRegistry.Register(BuiltinAdvisorConfig())
+	defaultRegistry.Register(BuiltinExploreConfig())
+	defaultRegistry.Register(BuiltinWorkerConfig())
+	defaultRegistry.Register(BuiltinReviewerConfig())
 
 	LoadAgents(opts.CWD)
 

@@ -205,20 +205,44 @@ func (t *ReadTool) Execute(ctx context.Context, params map[string]any, cwd strin
 		return toolresult.NewErrorResult(t.Name(), "error reading file: "+err.Error())
 	}
 
+	// Detect trailing newline: the scanner consumes it without recording it,
+	// so a file that ends in \n and a file that does not produce identical
+	// allLines. Seek to the last byte and check. The file handle is at EOF
+	// after the scanner drained it, so Seek is the only way to look back.
+	trailingNewline := false
+	if info.Size() > 0 {
+		lastByte := make([]byte, 1)
+		if _, seekErr := file.Seek(info.Size()-1, 0); seekErr == nil {
+			if nb, _ := file.Read(lastByte); nb == 1 {
+				trailingNewline = lastByte[0] == '\n'
+			}
+		}
+	}
+
 	recordFileRead(filePath, info)
 	duration := time.Since(start)
 
 	// Compute relPath and normalised full content once — used by both the
 	// summary path and the normal hashline path.
+	// fullContent is built from allLines (already in memory) to avoid a
+	// second os.ReadFile call. scanner.Text() already strips \r from \r\n
+	// lines, so joining with \n gives the same normalised result. Strip BOM
+	// from the first line if present (the scanner does not do this). Restore
+	// the trailing newline that the scanner consumed so ComputeFileHash
+	// produces the same tag that edit.go sees when it reads the file raw.
 	relPath := filePath
 	if cwd != "" {
 		if rel, relErr := filepath.Rel(cwd, filePath); relErr == nil {
 			relPath = rel
 		}
 	}
-	fullBytes, _ := os.ReadFile(filePath)
-	fullContent := strings.TrimPrefix(string(fullBytes), "\ufeff")
-	fullContent = strings.ReplaceAll(fullContent, "\r\n", "\n")
+	if len(allLines) > 0 {
+		allLines[0] = strings.TrimPrefix(allLines[0], "\ufeff")
+	}
+	fullContent := strings.Join(allLines, "\n")
+	if trailingNewline {
+		fullContent += "\n"
+	}
 
 	// --- Summary mode ---
 	// Triggered when:

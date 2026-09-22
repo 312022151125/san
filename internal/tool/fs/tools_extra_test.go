@@ -758,4 +758,3 @@ func TestSmartRead_SummaryFormat(t *testing.T) {
 		t.Errorf("last tail line should start with %q, got %q", lastExpected, tail[len(tail)-1])
 	}
 }
-

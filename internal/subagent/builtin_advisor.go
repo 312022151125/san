@@ -24,14 +24,14 @@ const advisorWhenToUse = "Use when architectural trade-offs exist between multip
 // project-level advisor.md overrides it.
 func BuiltinAdvisorConfig() *AgentConfig {
 	return &AgentConfig{
-		Name:         "advisor",
-		Description:  "Read-only reasoning consultant for difficult decisions",
-		WhenToUse:    advisorWhenToUse,
+		Name:           "advisor",
+		Description:    "Read-only reasoning consultant for difficult decisions",
+		WhenToUse:      advisorWhenToUse,
 		PermissionMode: PermissionExplore,
-		AllowTools:   ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob),
-		Model:        "inherit",
-		MaxSteps:     30,
-		Source:       "builtin",
-		SystemPrompt: advisorSystemPrompt,
+		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob),
+		Model:          "inherit",
+		MaxSteps:       30,
+		Source:         "builtin",
+		SystemPrompt:   advisorSystemPrompt,
 	}
 }

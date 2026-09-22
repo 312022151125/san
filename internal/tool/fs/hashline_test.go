@@ -194,10 +194,10 @@ func TestNormalizeFileTag(t *testing.T) {
 		{"@file src/app.go#a1b2", "A1B2"},
 		{"", ""},
 		{"#", ""},
-		{"ABC", ""},     // 3 chars — too short
-		{"A1B2C", ""},   // 5 chars — too long
-		{"ZZZZ", ""},    // not hex
-		{"A1G2", ""},    // G is not hex
+		{"ABC", ""},   // 3 chars — too short
+		{"A1B2C", ""}, // 5 chars — too long
+		{"ZZZZ", ""},  // not hex
+		{"A1G2", ""},  // G is not hex
 	}
 	for _, c := range cases {
 		got := NormalizeFileTag(c.in)

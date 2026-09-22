@@ -86,9 +86,12 @@ func ResetDefaultRegistry()           // test-only
   the executor to specific agent names.
 - `executor_prompt.go` / `executor_run.go` / `executor_session.go` —
   split executor concerns (charter assembly, run loop, session attribution).
-- `builtin_advisor.go` — compiled-in default `advisor` agent definition
-  (`explore` mode, `Read/Grep/Glob`, `MaxSteps: 30`). Registered at lowest
-  priority; any user/project `advisor.md` overrides it.
+- `builtin_advisor.go`, `builtin_explore.go`, `builtin_worker.go`,
+  `builtin_reviewer.go` — compiled-in default agent definitions.
+  `advisor`, `explore`, `reviewer`: `PermissionExplore`, `Read/Grep/Glob`,
+  `MaxSteps: 30`. `worker`: `PermissionAcceptEdits`, inherits all tools,
+  `MaxSteps: 50`. All registered at lowest priority; any user/project
+  `<name>.md` overrides the built-in with the same name.
 - `loader.go` — reads markdown agent definitions from `.san/agents/`
   (project, then user), `.claude/agents/` (Claude Code compatible), and
   plugin paths; lower-priority sources load first so higher ones win by
@@ -105,9 +108,10 @@ func ResetDefaultRegistry()           // test-only
 ## Lifecycle
 
 - Construction: `Initialize(Options{CWD, PluginAgentPaths})` registers
-  built-in agents (currently `advisor`), then loads user/project/plugin
-  definitions, then initializes state stores. Built-ins register first so
-  filesystem definitions win.
+  built-in agents (`advisor`, `explore`, `worker`, `reviewer`), then loads
+  user/project/plugin definitions, then initializes state stores. Built-ins
+  register first so filesystem definitions win; a `.san/agents/<name>.md`
+  with the same name overrides the built-in.
 - Per-invocation: `NewExecutor(provider, cwd, model, hookEngine)` →
   `Executor.Run(ctx, req)` spawns a `core.Agent`, blocks until end of
   turn, returns the aggregated `AgentResult`. `RunBackground(req)` wraps
@@ -119,8 +123,14 @@ func ResetDefaultRegistry()           // test-only
 - The agent model is flat: only the main conversation spawns subagents. The
   `Agent` tool is parent-only in `tool.Set`, so a subagent never sees it —
   nothing to enforce at runtime.
-- Concurrency: multiple executors may run in parallel; the registry is
-  RWMutex-protected.
+- Concurrency: `RunBackground` enforces two semaphore limits via buffered
+  channels. `maxBackgroundConcurrency = 3` caps total concurrent background
+  agents. `maxBackgroundWriters = 1` serializes agents that hold write
+  permissions (`PermissionMode != PermissionExplore`). Read-only agents
+  (`explore`, `advisor`, `reviewer`) run in parallel up to the concurrency
+  cap but do not consume a writer slot. The caller blocks until a slot is
+  available; `Run` (foreground) is unaffected. The registry is
+  RWMutex-protected separately.
 
 ## Tests
 

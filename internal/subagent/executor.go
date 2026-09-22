@@ -24,6 +24,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// maxBackgroundConcurrency is the maximum number of background agent goroutines
+// that may run in parallel across the whole executor.
+const maxBackgroundConcurrency = 3
+
+// maxBackgroundWriters is the maximum number of those goroutines that may hold
+// write permissions (PermissionMode != PermissionExplore) simultaneously.
+// Read-only agents (explore, advisor, reviewer) are not limited by this cap.
+const maxBackgroundWriters = 1
+
 // ProviderResolver turns a vendor name into a live provider so a subagent can
 // run on a different vendor than its parent. The app wires an *llm.ProviderPool;
 // unresolved explicit "vendor/model" overrides fall back to the parent provider.
@@ -50,8 +59,14 @@ type Executor struct {
 	mcpTools                   mcp.Tools            // tool schemas + execution
 	mcpServers                 mcp.Servers          // connect/disconnect for per-subagent server sets
 	disabledToolsMu            sync.RWMutex
-	disabledTools              map[string]bool // effective global disabled tools, copied on set/read
+	disabledTools              map[string]bool   // effective global disabled tools, copied on set/read
 	modelOverrides             map[string]string // per-agent-name model overrides, set by SetModelOverride
+
+	// concurrencySem caps total concurrent background agents (capacity = maxBackgroundConcurrency).
+	// writerSem caps concurrent write-permitted background agents (capacity = maxBackgroundWriters).
+	// Both are buffered channels used as counting semaphores: send to acquire, receive to release.
+	concurrencySem chan struct{}
+	writerSem      chan struct{}
 }
 
 type SubagentSessionStore interface {
@@ -92,11 +107,13 @@ func PermissionModeFromOperationMode(mode setting.OperationMode) PermissionMode 
 // parent permission mode getter.
 func NewExecutor(llmProvider llm.Provider, cwd string, parentModelID string, hookEngine hook.Handler) *Executor {
 	return &Executor{
-		provider:      llmProvider,
-		registry:      Default(),
-		cwd:           cwd,
-		parentModelID: parentModelID,
-		hooks:         hookEngine,
+		provider:       llmProvider,
+		registry:       Default(),
+		cwd:            cwd,
+		parentModelID:  parentModelID,
+		hooks:          hookEngine,
+		concurrencySem: make(chan struct{}, maxBackgroundConcurrency),
+		writerSem:      make(chan struct{}, maxBackgroundWriters),
 	}
 }
 
@@ -185,6 +202,38 @@ func (e *Executor) disabledToolsSnapshot() map[string]bool {
 	return maps.Clone(e.disabledTools)
 }
 
+// acquireSemaphores claims a concurrency slot and, for write-permitted agents,
+// a writer slot. It blocks until both are available or ctx is done.
+// Callers must call releaseSemaphores(needsWriteLock) in a deferred statement
+// after a successful acquire.
+func (e *Executor) acquireSemaphores(ctx context.Context, needsWriteLock bool) error {
+	select {
+	case e.concurrencySem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if !needsWriteLock {
+		return nil
+	}
+	select {
+	case e.writerSem <- struct{}{}:
+	case <-ctx.Done():
+		// Release the concurrency slot we already acquired before returning.
+		<-e.concurrencySem
+		return ctx.Err()
+	}
+	return nil
+}
+
+// releaseSemaphores releases the slots acquired by acquireSemaphores.
+// Must be called with the same needsWriteLock value used during acquire.
+func (e *Executor) releaseSemaphores(needsWriteLock bool) {
+	if needsWriteLock {
+		<-e.writerSem
+	}
+	<-e.concurrencySem
+}
+
 // SetSessionStore configures session persistence for subagent conversations.
 // When set, completed subagent conversations are saved under the parent session.
 func (e *Executor) SetSessionStore(store SubagentSessionStore, parentSessionID string) {
@@ -231,6 +280,11 @@ func (e *Executor) Run(ctx context.Context, req tool.AgentExecRequest) (*AgentRe
 }
 
 // RunBackground executes an agent in the background and returns the task.
+//
+// It blocks until a concurrency slot (and, for write-permitted agents, a
+// writer slot) is available. At most maxBackgroundConcurrency agents run at
+// once; at most maxBackgroundWriters of those may hold write permissions.
+// Read-only agents (explore, advisor, reviewer) do not consume a writer slot.
 func (e *Executor) RunBackground(req tool.AgentExecRequest) (*task.AgentTask, error) {
 	if err := e.validateRequest(req); err != nil {
 		return nil, err
@@ -238,6 +292,20 @@ func (e *Executor) RunBackground(req tool.AgentExecRequest) (*task.AgentTask, er
 	config, ok := e.resolveRequestAgentConfig(req)
 	if !ok {
 		return nil, fmt.Errorf("unknown or disabled agent: %s", req.Agent)
+	}
+
+	// Determine whether this agent needs the writer slot before acquiring.
+	// Use the effective (request-aware) permission mode so that a caller
+	// overriding mode="edit" on a read-only agent still acquires the writer
+	// slot, and a mode="explore" override releases the requirement.
+	effectiveMode := e.requestPermissionMode(config, req)
+	needsWriteLock := effectiveMode != PermissionExplore
+
+	// Block the caller until a slot is available. context.Background() is
+	// intentional: the caller should wait in the tool-execution goroutine
+	// rather than returning a task that is silently queued.
+	if err := e.acquireSemaphores(context.Background(), needsWriteLock); err != nil {
+		return nil, fmt.Errorf("background agent slot unavailable: %w", err)
 	}
 
 	identity := config.Name
@@ -261,6 +329,7 @@ func (e *Executor) RunBackground(req tool.AgentExecRequest) (*task.AgentTask, er
 
 	go func() {
 		defer cancel()
+		defer e.releaseSemaphores(needsWriteLock)
 
 		result, err := e.Run(ctx, req)
 		if err != nil {

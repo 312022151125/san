@@ -32,10 +32,10 @@ func mkTree(t *testing.T) string {
 		}
 	}
 	files := map[string]string{
-		filepath.Join(root, "a.go"):        "package main\n",
-		filepath.Join(root, "b.go"):        "package main\n",
-		filepath.Join(root, "sub", "c.go"): "package sub\n",
-		filepath.Join(root, "sub", "d.ts"): "export {}\n",
+		filepath.Join(root, "a.go"):         "package main\n",
+		filepath.Join(root, "b.go"):         "package main\n",
+		filepath.Join(root, "sub", "c.go"):  "package sub\n",
+		filepath.Join(root, "sub", "d.ts"):  "export {}\n",
 		filepath.Join(root, "sub2", "e.go"): "package sub2\n",
 	}
 	for path, content := range files {

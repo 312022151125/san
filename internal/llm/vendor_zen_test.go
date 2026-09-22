@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/genai-io/sdk-go/pkg/ai"
 	"github.com/genai-io/san/internal/core"
+	"github.com/genai-io/sdk-go/pkg/ai"
 )
 
 // sessionIDPattern matches the canonical ses_<12 hex><14 alphanum> format
@@ -282,8 +282,8 @@ func TestZenAPIForModelFamily(t *testing.T) {
 // with OpenAIChatCompat.
 func TestZenInferSetsCompatWithAPI(t *testing.T) {
 	cases := []struct {
-		id        string
-		wantAPI   ai.API
+		id         string
+		wantAPI    ai.API
 		wantCompat any
 	}{
 		{"gpt-5.5", ai.APIOpenAIResponses, ai.OpenAIResponsesCompat{}},

@@ -56,18 +56,17 @@ commands change. Do not duplicate them here.
 
 ## Default Agents
 
-The five conceptual default lightweight-coding agents:
+The four built-in lightweight-coding agents:
 
 | Agent    | Role                                      | Notes |
 |----------|-------------------------------------------|-------|
-| explore  | Fast read-only repository exploration     | Permission mode, not a defined agent |
-| planner  | Implementation planning and decomposition | User-defined convention |
-| worker   | Coding and implementation                 | User-defined convention |
-| reviewer | Correctness review                        | User-defined convention |
+| explore  | Fast read-only repository exploration     | Built-in compiled-in default |
+| worker   | Coding and implementation                 | Built-in compiled-in default |
+| reviewer | Correctness review                        | Built-in compiled-in default |
 | advisor  | Difficult reasoning / second opinion      | Built-in compiled-in default |
 
-`advisor` is the only compiled-in default. The others are user-defined
-conventions documented in [`docs/guides/writing-a-subagent.md`](docs/guides/writing-a-subagent.md).
+All four are compiled-in defaults. Any user- or project-level
+`.san/agents/<name>.md` overrides the built-in with the same name.
 Use `advisor` on-demand for architectural trade-offs, debugging dead ends,
 and non-trivial correctness or concurrency questions. See
 [`docs/guides/advisor-agent.md`](docs/guides/advisor-agent.md).
