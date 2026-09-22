@@ -130,7 +130,7 @@ func (s *Set) agentAllTools() []core.ToolSchema {
 // "mcp__server__tool") and caller-built ExtraTools (e.g. the memory tools,
 // when the backend is on) are also considered.
 func (s *Set) agentTools() []core.ToolSchema {
-	allTools := GetToolSchemasWith(SchemaOptions{ExtraTools: s.ExtraTools})
+	allTools := GetToolSchemasWith(SchemaOptions{ExtraTools: s.ExtraTools, BatchEnabled: s.BatchEnabled})
 
 	// Build allow set for fast lookup
 	allowSet := make(map[string]bool, len(s.Allow))

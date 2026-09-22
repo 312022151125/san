@@ -86,6 +86,10 @@ type AgentExecRequest struct {
 	TaskID     string
 	OnActivity ActivityFunc
 	OnQuestion AskQuestionFunc
+	// Depth tracks nesting level from the root session.
+	// 0 = main session, 1 = direct batch child, 2 = grandchild batch, etc.
+	// Used for logging and for enforcing spawn-depth limits in future phases.
+	Depth int
 }
 
 // AgentYield is the structured compact result a batch child returns to its parent.

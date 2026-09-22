@@ -44,10 +44,13 @@ func (s *Session) Start(params BuildParams, messages []core.Message) error {
 		return fmt.Errorf("agent session already active")
 	}
 
-	// Initialise metrics for this session and chain the counter into OnEvent.
+	// Initialise metrics for this session: chain the event counter AND inject
+	// the metrics object into build params so tool execution contexts carry it
+	// (enables Batch/RunBatch to record command steps and subagent calls).
 	m := core.NewSessionMetrics()
 	s.metrics = m
 	params.OnEvent = chainOnEvent(params.OnEvent, metricsObserver(m))
+	params.Metrics = m
 
 	builder := s.build
 	if builder == nil {

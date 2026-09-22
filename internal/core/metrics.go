@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -77,6 +78,26 @@ type SessionMetricsSnapshot struct {
 	OutputTokens  int
 	CacheTokens   int
 	Duration      time.Duration
+}
+
+// metricsKey is the context key for the session metrics.
+type metricsKey struct{}
+
+// WithMetrics stores a *SessionMetrics in the context so tools executed
+// within a session can record command steps and subagent calls without
+// requiring setter methods on each tool.
+func WithMetrics(ctx context.Context, m *SessionMetrics) context.Context {
+	if m == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, metricsKey{}, m)
+}
+
+// MetricsFromContext retrieves the *SessionMetrics from the context, or nil
+// when the context carries no metrics (e.g. in tests or headless runs).
+func MetricsFromContext(ctx context.Context) *SessionMetrics {
+	m, _ := ctx.Value(metricsKey{}).(*SessionMetrics)
+	return m
 }
 
 // String formats the snapshot for display in the /debug metrics command.

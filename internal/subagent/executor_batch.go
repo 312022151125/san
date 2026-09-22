@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/genai-io/san/internal/core"
+	"github.com/genai-io/san/internal/task"
 	"github.com/genai-io/san/internal/tool"
 )
 
@@ -99,6 +102,23 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 		}
 	}
 
+	// P2-A: Register all batch items in the task manager before any goroutine
+	// starts, with status=queued. This makes them visible in task listings and
+	// gives them deterministic IDs for log references before execution begins.
+	mgr := task.Default()
+	agentTasks := make([]*task.AgentTask, len(resolved))
+	for i, ri := range resolved {
+		desc := ri.item.Name
+		if desc == "" {
+			desc = ri.item.Task
+		}
+		if len(desc) > 80 {
+			desc = desc[:77] + "..."
+		}
+		at := mgr.CreateQueuedAgentTask(ri.item.ID, ri.config.Name, desc)
+		agentTasks[i] = at
+	}
+
 	// --- Fan out concurrently ---
 	start := time.Now()
 
@@ -107,7 +127,7 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 	wg.Add(len(resolved))
 
 	for i, ri := range resolved {
-		go func(idx int, ri resolvedItem) {
+		go func(idx int, ri resolvedItem, at *task.AgentTask) {
 			defer wg.Done()
 
 			// Build the child prompt: shared context first, then the task delta.
@@ -120,11 +140,15 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 				Description:         ri.item.Name,
 				Mode:                ri.item.Mode,
 				TaskID:              "",  // foreground batch run
+				Depth:               1,   // P2-B: batch children are always depth 1
 			}
 
 			// Acquire semaphores (respects concurrency and writer limits).
 			needsWrite := isWriteCapableMode(ri.mode)
 			if err := e.acquireSemaphores(ctx, needsWrite); err != nil {
+				if at != nil {
+					at.Complete(fmt.Errorf("semaphore acquire failed: %v", err))
+				}
 				results[idx] = tool.AgentExecResult{
 					AgentID:   ri.item.ID,
 					AgentName: ri.item.Name,
@@ -135,8 +159,21 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 			}
 			defer e.releaseSemaphores(needsWrite)
 
+			// P2-A: transition task to running now that a slot was acquired.
+			if at != nil {
+				at.MarkRunning()
+			}
+
+			// P2-E: record each batch child execution in the parent's metrics.
+			if m := core.MetricsFromContext(ctx); m != nil {
+				m.RecordSubagentCall()
+			}
+
 			result, err := e.Run(ctx, execReq)
 			if err != nil {
+				if at != nil {
+					at.Complete(err)
+				}
 				results[idx] = tool.AgentExecResult{
 					AgentID:   ri.item.ID,
 					AgentName: ri.item.Name,
@@ -168,6 +205,11 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 				execResult.AgentID = ri.item.ID
 			}
 
+			// P1-A: Build a compact AgentYield.Summary from the result content.
+			// This gives the parent a structured token-efficient view of what the
+			// child found/did, without inlining the full transcript.
+			execResult.Yield = extractYield(result.Content)
+
 			// Store large results to disk (D4) to avoid flooding parent context.
 			if len(result.Content) > batchResultThreshold && outputDir != "" {
 				ref, err := storeBatchArtifact(outputDir, execResult.AgentID, result.Content)
@@ -179,8 +221,16 @@ func (e *Executor) RunBatch(ctx context.Context, req tool.AgentBatchRequest, out
 				}
 			}
 
+			if at != nil {
+				var completeErr error
+				if !result.Success {
+					completeErr = fmt.Errorf("%s", result.Error)
+				}
+				at.Complete(completeErr)
+			}
+
 			results[idx] = execResult
-		}(i, ri)
+		}(i, ri, agentTasks[i])
 	}
 
 	wg.Wait()
@@ -224,4 +274,87 @@ func storeBatchArtifact(outputDir, agentID, content string) (string, error) {
 		return "", err
 	}
 	return "agent://" + agentID, nil
+}
+
+// extractYield builds a compact AgentYield from agent result content.
+//
+// P1-A: The goal is to populate AgentYield.Summary with a concise excerpt from
+// the child's final message so the parent has a structured token-efficient
+// signal without inlining the full transcript.
+//
+// Strategy:
+//   - If the content starts with a heading line (## Summary / # Summary),
+//     extract the paragraph immediately following it.
+//   - Otherwise, use the first non-empty paragraph (up to summaryMaxChars).
+//   - If no paragraph is found, use the first summaryMaxChars characters.
+//
+// The full content is still available via ResultRef when it was stored to disk,
+// or via Content when it was small enough to inline.
+const summaryMaxChars = 500
+
+func extractYield(content string) *tool.AgentYield {
+	if content == "" {
+		return &tool.AgentYield{}
+	}
+
+	// Normalise line endings.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+
+	// Try to find a "## Summary" or "# Summary" heading and take the next
+	// paragraph. This captures agents that follow the structured yield format.
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(strings.TrimLeft(trimmed, "#"))
+		lower = strings.TrimSpace(lower)
+		if (strings.HasPrefix(trimmed, "#")) && lower == "summary" {
+			// Collect non-empty lines after the heading until a blank separator.
+			var para []string
+			for j := i + 1; j < len(lines); j++ {
+				l := strings.TrimSpace(lines[j])
+				if l == "" && len(para) > 0 {
+					break
+				}
+				if strings.HasPrefix(l, "#") && len(para) > 0 {
+					break // next heading — stop
+				}
+				if l != "" {
+					para = append(para, l)
+				}
+			}
+			if len(para) > 0 {
+				summary := strings.Join(para, " ")
+				if len(summary) > summaryMaxChars {
+					summary = summary[:summaryMaxChars] + "…"
+				}
+				return &tool.AgentYield{Summary: summary}
+			}
+		}
+	}
+
+	// Fall back: first non-empty paragraph.
+	var para []string
+	for _, line := range lines {
+		l := strings.TrimSpace(line)
+		if l == "" && len(para) > 0 {
+			break
+		}
+		if l != "" && !strings.HasPrefix(l, "#") {
+			para = append(para, l)
+		}
+	}
+	if len(para) > 0 {
+		summary := strings.Join(para, " ")
+		if len(summary) > summaryMaxChars {
+			summary = summary[:summaryMaxChars] + "…"
+		}
+		return &tool.AgentYield{Summary: summary}
+	}
+
+	// Last resort: first summaryMaxChars characters of the raw content.
+	summary := strings.TrimSpace(content)
+	if len(summary) > summaryMaxChars {
+		summary = summary[:summaryMaxChars] + "…"
+	}
+	return &tool.AgentYield{Summary: summary}
 }

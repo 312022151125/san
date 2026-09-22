@@ -59,6 +59,52 @@ func NewAgentTask(id, agentName, description string, ctx context.Context, cancel
 	return task
 }
 
+// NewQueuedAgentTask creates an agent task with StatusQueued.
+// It has no context/cancel of its own — MarkRunning provides the live context
+// once a concurrency semaphore slot is acquired. Use CreateQueuedAgentTask on
+// the Manager which supplies the output path.
+func NewQueuedAgentTask(id, agentName, description, outputPath string) *AgentTask {
+	task := &AgentTask{
+		ID:          id,
+		AgentName:   agentName,
+		Description: description,
+		Status:      StatusQueued,
+		StartTime:   time.Now(),
+		OutputFile:  initOutputFile(outputPath),
+		done:        make(chan struct{}),
+	}
+	appendOutputFile(task.OutputFile, outputRecord{
+		Event:       "task.queued",
+		TaskType:    string(TaskTypeAgent),
+		Description: description,
+		Metadata: map[string]any{
+			"agent_name": agentName,
+		},
+	})
+	return task
+}
+
+// MarkRunning transitions the task from StatusQueued to StatusRunning.
+// It is idempotent: if the task is already Running (or terminal) this is a
+// no-op. Call this once the concurrency semaphore slot has been acquired.
+func (t *AgentTask) MarkRunning() {
+	t.mu.Lock()
+	if t.Status != StatusQueued {
+		t.mu.Unlock()
+		return
+	}
+	t.Status = StatusRunning
+	outputFile := t.OutputFile
+	t.mu.Unlock()
+
+	appendOutputFile(outputFile, outputRecord{
+		Event: "task.started",
+		Metadata: map[string]any{
+			"agent_name": t.AgentName,
+		},
+	})
+}
+
 // SetIdentity stores stable agent identity metadata for continuation.
 func (t *AgentTask) SetIdentity(agentName, sessionID string) {
 	t.mu.Lock()
@@ -169,7 +215,10 @@ func (t *AgentTask) markKilled() { t.finalize(StatusKilled, "") }
 // the invariant it enforces and why.
 func (t *AgentTask) finalize(status TaskStatus, errText string) {
 	t.mu.Lock()
-	if t.Status != StatusRunning {
+	// Accept both StatusRunning and StatusQueued as valid pre-conditions so
+	// that a queued batch child which errors before MarkRunning is reached can
+	// still be finalized without leaking an undrained done channel.
+	if t.Status != StatusRunning && t.Status != StatusQueued {
 		t.mu.Unlock()
 		return
 	}
@@ -192,11 +241,13 @@ func (t *AgentTask) finalize(status TaskStatus, errText string) {
 	notifyTaskCompleted(t.GetStatus())
 }
 
-// IsRunning returns true if the task is still running
+// IsRunning returns true if the task is queued or actively running.
+// StatusQueued is treated as running here because from the manager's perspective
+// a queued batch child is active work that has not yet completed.
 func (t *AgentTask) IsRunning() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.Status == StatusRunning
+	return t.Status == StatusRunning || t.Status == StatusQueued
 }
 
 // WaitForCompletion waits until the task completes or timeout.

@@ -38,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/genai-io/san/internal/core"
 	"github.com/genai-io/san/internal/proc"
 	"github.com/genai-io/san/internal/tool"
 	"github.com/genai-io/san/internal/tool/perm"
@@ -327,6 +328,10 @@ func executeBatch(ctx context.Context, cmds []BatchCommand, cwd, outputDir strin
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				runCommand(ctx, c, cwd, outputDir, res)
+				// P2-E: record each command step that actually ran (not skipped).
+				if m := core.MetricsFromContext(ctx); m != nil {
+					m.RecordCommandStep()
+				}
 			}(c, res)
 		}
 		wg.Wait()
@@ -345,6 +350,11 @@ func executeBatch(ctx context.Context, cmds []BatchCommand, cwd, outputDir strin
 }
 
 // runCommand executes a single command and populates res.
+//
+// stdout and stderr are captured separately. On failure, stderr is checked
+// first for error lines (most tools write diagnostics there); stdout is
+// appended so the combined output is available for extraction. On success,
+// only stdout is kept to avoid noisy build progress lines from stderr.
 func runCommand(ctx context.Context, c BatchCommand, cwd, outputDir string, res *CommandResult) {
 	cmdCtx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
@@ -360,9 +370,9 @@ func runCommand(ctx context.Context, c BatchCommand, cwd, outputDir string, res 
 	}
 	cmd.WaitDelay = 5 * time.Second
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
 	res.Duration = time.Since(start)
@@ -374,20 +384,34 @@ func runCommand(ctx context.Context, c BatchCommand, cwd, outputDir string, res 
 		res.Err = runErr.Error()
 	}
 
-	raw := out.Bytes()
+	// Combine for storage and extraction: stderr first (errors) then stdout.
+	// On success the model typically doesn't need stderr noise, so we only
+	// include it when the command failed.
+	var combined []byte
+	if res.ExitCode != 0 || res.Err != "" {
+		// failure: stderr errors + stdout output (stderr is more signal-rich)
+		combined = append(stderr.Bytes(), stdout.Bytes()...)
+	} else {
+		// success: stdout only — stderr is often progress/warnings not worth
+		// injecting into context
+		combined = stdout.Bytes()
+	}
 
 	// Store to file when output is large (D4: reuse task outputDir).
-	if len(raw) > LargeOutputThreshold && outputDir != "" {
+	if len(combined) > LargeOutputThreshold && outputDir != "" {
 		path := filepath.Join(outputDir, "batch-"+c.ID+".log")
-		if writeErr := os.WriteFile(path, raw, 0o644); writeErr == nil {
+		// Store the full combined output (stderr+stdout) regardless of exit
+		// so the developer can inspect the complete trace.
+		full := append(stderr.Bytes(), stdout.Bytes()...)
+		if writeErr := os.WriteFile(path, full, 0o644); writeErr == nil {
 			res.LogRef = ArtifactRef("log:" + path)
 			// Keep only the relevant extract inline.
-			res.Output = extractRelevant(string(raw), MaxInlineBytes)
+			res.Output = extractRelevant(string(combined), MaxInlineBytes)
 			return
 		}
 	}
 
-	res.Output = extractRelevant(string(raw), MaxInlineBytes)
+	res.Output = extractRelevant(string(combined), MaxInlineBytes)
 }
 
 // buildWaves performs a topological sort of commands into execution waves.

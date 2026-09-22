@@ -80,6 +80,12 @@ type BuildParams struct {
 	// from the pre-execution gate above.
 	BashPromptResponder tool.BashPromptResponderProvider
 
+	// Metrics, when non-nil, receives command-step and subagent-call counts
+	// from tools executed within this session. It is injected into the tool
+	// execution context via core.WithMetrics so Batch and RunBatch can record
+	// without needing direct setter methods. nil = metrics disabled.
+	Metrics *core.SessionMetrics
+
 	// OnEvent observes every agent lifecycle event synchronously, alongside
 	// outbox delivery. Used by the trace recorder; nil leaves recording off.
 	OnEvent func(core.Event)
@@ -134,6 +140,9 @@ func buildAgent(p BuildParams) (core.Agent, *PermissionGate, error) {
 	}
 	if p.BashPromptResponder != nil {
 		adaptOpts = append(adaptOpts, tool.WithBashPromptResponderProvider(p.BashPromptResponder))
+	}
+	if p.Metrics != nil {
+		adaptOpts = append(adaptOpts, tool.WithMetrics(p.Metrics))
 	}
 	pg := NewPermissionGate(p.PermissionRules)
 	pg.SetReviewer(p.PermissionReview)

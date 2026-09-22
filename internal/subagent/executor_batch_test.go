@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/genai-io/san/internal/task"
 	"github.com/genai-io/san/internal/tool"
 )
 
@@ -223,6 +224,133 @@ func TestStoreBatchArtifactWritesAndReturnsRef(t *testing.T) {
 	}
 	if string(data) != content {
 		t.Errorf("file content = %q, want %q", data, content)
+	}
+}
+
+// ---- extractYield tests (P1-A) ----
+
+// TestExtractYieldEmpty verifies that empty content returns an empty summary.
+func TestExtractYieldEmpty(t *testing.T) {
+	y := extractYield("")
+	if y == nil {
+		t.Fatal("expected non-nil AgentYield for empty content")
+	}
+	if y.Summary != "" {
+		t.Errorf("expected empty summary for empty content, got %q", y.Summary)
+	}
+}
+
+// TestExtractYieldSummaryHeading verifies that a "## Summary" section is
+// extracted as the structured summary.
+func TestExtractYieldSummaryHeading(t *testing.T) {
+	content := `## Summary
+Provider routing uses a round-robin strategy.
+
+## Details
+Some other details.`
+	y := extractYield(content)
+	if y == nil || y.Summary == "" {
+		t.Fatalf("expected non-empty summary, got %+v", y)
+	}
+	if !containsStr(y.Summary, "round-robin") {
+		t.Errorf("summary should contain extracted text, got %q", y.Summary)
+	}
+}
+
+// TestExtractYieldSingleHashHeading verifies that a "# Summary" heading also works.
+func TestExtractYieldSingleHashHeading(t *testing.T) {
+	content := "# Summary\nFound 3 files.\n"
+	y := extractYield(content)
+	if y == nil || y.Summary == "" {
+		t.Fatal("expected non-empty summary")
+	}
+	if !containsStr(y.Summary, "Found 3 files") {
+		t.Errorf("unexpected summary: %q", y.Summary)
+	}
+}
+
+// TestExtractYieldFallbackFirstParagraph verifies that when there is no
+// Summary heading, the first paragraph is used.
+func TestExtractYieldFallbackFirstParagraph(t *testing.T) {
+	content := "Explored the provider package. Found routing in provider.go.\n\nOther info follows."
+	y := extractYield(content)
+	if y == nil || y.Summary == "" {
+		t.Fatal("expected non-empty summary")
+	}
+	if !containsStr(y.Summary, "provider package") {
+		t.Errorf("unexpected summary: %q", y.Summary)
+	}
+}
+
+// TestExtractYieldTruncatesLongContent verifies that content longer than
+// summaryMaxChars is truncated with an ellipsis marker.
+func TestExtractYieldTruncatesLongContent(t *testing.T) {
+	longContent := make([]byte, summaryMaxChars+200)
+	for i := range longContent {
+		longContent[i] = 'a'
+	}
+	y := extractYield(string(longContent))
+	if y == nil {
+		t.Fatal("expected non-nil yield")
+	}
+	if len(y.Summary) > summaryMaxChars+10 {
+		t.Errorf("summary not truncated: len=%d", len(y.Summary))
+	}
+}
+
+// ---- Depth propagation tests (P2-B) ----
+
+// TestAgentExecRequestDepthField verifies that the Depth field exists and
+// can be set (compilation check plus basic sanity).
+func TestAgentExecRequestDepthField(t *testing.T) {
+	req := tool.AgentExecRequest{Depth: 1}
+	if req.Depth != 1 {
+		t.Errorf("Depth field not propagated: got %d", req.Depth)
+	}
+}
+
+// ---- StatusQueued / MarkRunning tests (P2-A) ----
+
+// TestNewQueuedAgentTaskInitialStatus verifies a queued task starts with
+// StatusQueued and IsRunning returns true (it is active work).
+func TestNewQueuedAgentTaskInitialStatus(t *testing.T) {
+	at := task.NewQueuedAgentTask("id1", "explore", "map routing", "")
+	if at.Status != task.StatusQueued {
+		t.Errorf("expected StatusQueued, got %q", at.Status)
+	}
+	if !at.IsRunning() {
+		t.Error("IsRunning should return true for a queued task")
+	}
+}
+
+// TestMarkRunningTransitionsStatus verifies that MarkRunning moves the task
+// from StatusQueued to StatusRunning.
+func TestMarkRunningTransitionsStatus(t *testing.T) {
+	at := task.NewQueuedAgentTask("id2", "worker", "implement X", "")
+	at.MarkRunning()
+	if at.Status != task.StatusRunning {
+		t.Errorf("expected StatusRunning after MarkRunning, got %q", at.Status)
+	}
+}
+
+// TestMarkRunningIsIdempotent verifies that calling MarkRunning on a task
+// that is already Running (or terminal) is a no-op.
+func TestMarkRunningIsIdempotent(t *testing.T) {
+	at := task.NewQueuedAgentTask("id3", "worker", "implement Y", "")
+	at.MarkRunning()
+	at.MarkRunning() // second call should not panic or change state
+	if at.Status != task.StatusRunning {
+		t.Errorf("expected StatusRunning, got %q", at.Status)
+	}
+}
+
+// TestQueuedTaskFinalizeBeforeMarkRunning verifies that Complete() works on a
+// queued task that never became Running (semaphore error path).
+func TestQueuedTaskFinalizeBeforeMarkRunning(t *testing.T) {
+	at := task.NewQueuedAgentTask("id4", "worker", "never ran", "")
+	at.Complete(nil) // should not deadlock or panic
+	if at.IsRunning() {
+		t.Error("completed task should not report IsRunning")
 	}
 }
 

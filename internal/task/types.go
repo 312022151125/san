@@ -16,6 +16,11 @@ const (
 type TaskStatus string
 
 const (
+	// StatusQueued marks a batch child that has been registered in the task
+	// manager but is waiting for a concurrency semaphore slot. It transitions
+	// to StatusRunning once the slot is acquired. Only used by RunBatch; normal
+	// background tasks start directly in StatusRunning.
+	StatusQueued    TaskStatus = "queued"
 	StatusRunning   TaskStatus = "running"
 	StatusCompleted TaskStatus = "completed"
 	StatusFailed    TaskStatus = "failed"

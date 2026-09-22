@@ -49,6 +49,7 @@ type adaptConfig struct {
 	messagesGetter  MessagesGetter
 	activityFn      func(toolCallID string, msg string)
 	promptResponder BashPromptResponderProvider
+	metrics         *core.SessionMetrics
 }
 
 // WithAskUser sets the handler the AskUserQuestion tool uses to ask the user.
@@ -71,6 +72,13 @@ func WithToolActivity(fn func(toolCallID string, msg string)) AdaptOption {
 // safely handle interactive prompts during execution.
 func WithBashPromptResponderProvider(fn BashPromptResponderProvider) AdaptOption {
 	return func(c *adaptConfig) { c.promptResponder = fn }
+}
+
+// WithMetrics injects session metrics into every tool execution context so
+// Batch and RunBatch can record command steps and subagent calls without
+// requiring direct setter methods on each tool implementation.
+func WithMetrics(m *core.SessionMetrics) AdaptOption {
+	return func(c *adaptConfig) { c.metrics = m }
 }
 
 // AdaptTool wraps a legacy Tool as a core.Tool with a dynamic CWD resolver.
@@ -96,7 +104,12 @@ func AdaptToolRegistry(schemas []core.ToolSchema, cwd func() string, opts ...Ada
 	var adapted []core.Tool
 	for name, schema := range schemaByName {
 		if t, ok := Get(name); ok {
-			adapted = append(adapted, &toolAdapter{inner: t, schema: schema, cwd: cwd, askFn: cfg.askFn, messagesGetter: cfg.messagesGetter, activityFn: cfg.activityFn, promptResponder: cfg.promptResponder})
+			adapted = append(adapted, &toolAdapter{
+				inner: t, schema: schema, cwd: cwd,
+				askFn: cfg.askFn, messagesGetter: cfg.messagesGetter,
+				activityFn: cfg.activityFn, promptResponder: cfg.promptResponder,
+				metrics: cfg.metrics,
+			})
 		}
 	}
 	return core.NewTools(adapted...)
@@ -111,6 +124,7 @@ type toolAdapter struct {
 	messagesGetter  MessagesGetter
 	activityFn      func(toolCallID string, msg string)
 	promptResponder BashPromptResponderProvider
+	metrics         *core.SessionMetrics
 }
 
 func (a *toolAdapter) Schema() core.ToolSchema { return a.schema }
@@ -120,6 +134,11 @@ func (a *toolAdapter) Run(ctx context.Context, call ai.ToolCall) (agent.Result, 
 	cwd := ""
 	if a.cwd != nil {
 		cwd = a.cwd()
+	}
+	// Inject session metrics into the tool context so Batch and RunBatch
+	// can record command steps and subagent calls via core.MetricsFromContext.
+	if a.metrics != nil {
+		ctx = core.WithMetrics(ctx, a.metrics)
 	}
 	if a.messagesGetter != nil {
 		ctx = WithMessagesGetter(ctx, a.messagesGetter)

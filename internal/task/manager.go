@@ -54,6 +54,16 @@ func (m *Manager) CreateAgentTask(id, agentName, description string, ctx context
 	return task
 }
 
+// CreateQueuedAgentTask creates and registers a batch child task with status=queued.
+// The task transitions to StatusRunning via MarkRunning once a concurrency slot
+// is acquired. Use this for RunBatch fan-out so all children appear in task
+// listings before any goroutine starts executing.
+func (m *Manager) CreateQueuedAgentTask(id, agentName, description string) *AgentTask {
+	task := NewQueuedAgentTask(id, agentName, description, m.outputPath(id))
+	m.RegisterTask(task)
+	return task
+}
+
 // SetOutputDir changes only this manager's output store. Multiple managers can
 // therefore coexist without redirecting one another's task logs.
 func (m *Manager) SetOutputDir(dir string) error {
