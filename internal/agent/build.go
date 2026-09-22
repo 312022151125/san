@@ -49,6 +49,13 @@ type BuildParams struct {
 	// self-learning is active). Nil ⇒ no extra tools.
 	ExtraTools []core.ToolSchema
 
+	// BatchEnabled controls whether the Agent tool schema exposes the batch
+	// parameters (tasks[], context). When false the fields are absent —
+	// zero token overhead for sessions that do not use agent batching.
+	// Set to true by the main agent build path; subagent tool sets inherit
+	// this value through tool.Set.BatchEnabled.
+	BatchEnabled bool
+
 	// PermissionRules and PermissionReview are the two stages of the
 	// pre-execution permission gate: the rules stage applies the static rules
 	// (permit/reject/prompt); the review stage is the LLM auto-review consulted
@@ -97,6 +104,7 @@ func (p BuildParams) Schemas() []core.ToolSchema {
 		Disabled:       p.DisabledTools,
 		AgentDirectory: p.AgentDirectory,
 		ExtraTools:     p.ExtraTools,
+		BatchEnabled:   p.BatchEnabled,
 	}).Tools()
 }
 

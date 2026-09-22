@@ -114,6 +114,11 @@ func (m *model) promptParams() agent.BuildParams {
 		// hindsight — retain/recall/reflect. Each source returns nil when
 		// its feature is off, so the toolset costs nothing otherwise.
 		ExtraTools: m.extraTools(),
+
+		// BatchEnabled: the main agent always gets the full Agent batch
+		// schema (tasks[], context). Subagents inherit this through
+		// newAgentToolSet, gated by permission mode.
+		BatchEnabled: true,
 	}
 }
 
@@ -762,6 +767,23 @@ func (m *model) preparePermissionRequest(req *conv.PermGateRequest) *perm.Permis
 	}
 }
 
+// sessionPlanModeChecker implements tool.PlanModeChecker by inspecting the
+// session's live permission posture. San uses ModeReadOnly for safe-tools-only
+// sessions (the explore/read-only subagent posture). Both the Batch tool and
+// the Agent RunBatch path check this to enforce their conservative Plan Mode
+// policies: Batch is rejected entirely; Agent RunBatch blocks write-capable
+// agents.
+//
+// SessionPermissions.CurrentMode() is mutex-protected and safe to call from
+// the agent goroutine concurrently with UI mode cycles.
+type sessionPlanModeChecker struct {
+	perms *setting.SessionPermissions
+}
+
+func (c sessionPlanModeChecker) IsPlanMode() bool {
+	return c.perms.CurrentMode() == setting.ModeReadOnly
+}
+
 func (m *model) ReconfigureAgentTool() {
 	if m.env.LLMProvider == nil {
 		return
@@ -786,13 +808,34 @@ func (m *model) ReconfigureAgentTool() {
 		snap.Subagents.ResolvedMaxWriters(0),
 	)
 
+	// Wire the output dir and Plan Mode checker for both the Agent batch
+	// path and the Batch tool. The output dir is shared with the task
+	// manager (D4: reuse task output directory for artifact storage).
+	checker := sessionPlanModeChecker{perms: m.env.SessionPermissions}
+	outputDir := m.services.Task.OutputDir()
+
 	adapter := subagent.NewExecutorAdapter(executor)
+	adapter.SetOutputDir(outputDir)
+	adapter.SetPlanModeChecker(checker)
+
 	type executorSetter interface{ SetExecutor(tool.AgentExecutor) }
 	for _, name := range []string{tool.ToolAgent, tool.ToolSendMessage} {
 		if t, ok := m.services.Tool.Get(name); ok {
 			if setter, ok := t.(executorSetter); ok {
 				setter.SetExecutor(adapter)
 			}
+		}
+	}
+
+	// Wire Batch tool with output dir + Plan Mode checker.
+	type batchConfigurator interface {
+		SetOutputDir(string)
+		SetPlanModeChecker(tool.PlanModeChecker)
+	}
+	if bt, ok := m.services.Tool.Get(tool.ToolBatch); ok {
+		if bc, ok := bt.(batchConfigurator); ok {
+			bc.SetOutputDir(outputDir)
+			bc.SetPlanModeChecker(checker)
 		}
 	}
 }

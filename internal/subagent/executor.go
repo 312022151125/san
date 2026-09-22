@@ -534,7 +534,11 @@ func (e *Executor) buildAgent(ctx context.Context, run *preparedRun, onToolExec 
 	if e.mcpTools != nil {
 		mcpGetter = e.mcpTools.GetToolSchemas
 	}
-	toolSet := newAgentToolSet(rc.config.AllowTools.Names(), rc.config.DenyTools.BareNames(), e.disabledToolsSnapshot(), mcpGetter, toolmemory.Schemas())
+	// Batch is available to write-capable subagents (worker, acceptEdits,
+	// bypass). Read-only agents (explore, advisor, reviewer) run in
+	// PermissionExplore mode and get no Batch schema — isWriteCapableMode
+	// mirrors the same gate used by executor_batch.go's Plan Mode check.
+	toolSet := newAgentToolSet(rc.config.AllowTools.Names(), rc.config.DenyTools.BareNames(), e.disabledToolsSnapshot(), mcpGetter, toolmemory.Schemas(), isWriteCapableMode(rc.permMode))
 	schemas := filterSchemasForPermission(toolSet.Tools(), rc.permMode, rc.config.AllowTools)
 	var ag core.Agent
 	adaptOpts := []tool.AdaptOption{tool.WithMessagesGetterProvider(func() []core.Message {
@@ -926,11 +930,12 @@ func modeAllowsSchema(mode PermissionMode, name string) bool {
 // exclusions eagerly initialized. extraTools carries caller-built conditional
 // schemas (currently the Hindsight memory tools when the backend is on); the
 // allow-list filter decides per agent whether any of them surface — retain
-// never does, being parent-only.
-func newAgentToolSet(allow, disallow []string, disabled map[string]bool, mcpGetter func() []core.ToolSchema, extraTools []core.ToolSchema) *tool.Set {
+// never does, being parent-only. batchEnabled threads through to the Agent
+// schema so write-capable subagents can also use task batching.
+func newAgentToolSet(allow, disallow []string, disabled map[string]bool, mcpGetter func() []core.ToolSchema, extraTools []core.ToolSchema, batchEnabled bool) *tool.Set {
 	s := &tool.Set{
 		Allow: slices.Clone(allow), Disallow: slices.Clone(disallow), Disabled: maps.Clone(disabled),
-		MCP: mcpGetter, IsAgent: true, ExtraTools: extraTools,
+		MCP: mcpGetter, IsAgent: true, ExtraTools: extraTools, BatchEnabled: batchEnabled,
 	}
 	s.InitDisallowSet()
 	return s

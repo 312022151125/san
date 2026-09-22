@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/genai-io/san/internal/app/input"
+	"github.com/genai-io/san/internal/core"
 )
 
 func (m *model) slashCommandEnv() input.SlashCommandEnv {
@@ -52,6 +53,7 @@ func (m *model) slashCommandEnv() input.SlashCommandEnv {
 		StopAgentSession:        m.StopAgentSession,
 		ResetAgentSession:       m.ResetAgentSession,
 		FireSessionEnd:          m.FireSessionEnd,
+		GetMetrics:              func() *core.SessionMetricsSnapshot { return m.services.Agent.Metrics().SnapshotPtr() },
 		BuildCompactRequest:     m.BuildCompactRequest,
 		SpinnerTickCmd:          m.SpinnerTickCmd,
 		ResetCronQueue:          m.ResetCronQueue,

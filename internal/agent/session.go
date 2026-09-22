@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	sdkagent "github.com/genai-io/sdk-go/pkg/agent"
 	"go.uber.org/zap"
 
 	"github.com/genai-io/san/internal/core"
@@ -30,6 +31,7 @@ type Session struct {
 	permGate           *PermissionGate
 	pendingPermRequest *PermGateRequest
 	pluginRoot         string // see SetPluginRoot
+	metrics            *core.SessionMetrics
 	// build is set by tests to substitute the agent; nil means buildAgent.
 	build func(BuildParams) (core.Agent, *PermissionGate, error)
 }
@@ -41,6 +43,11 @@ func (s *Session) Start(params BuildParams, messages []core.Message) error {
 	if s.run != nil {
 		return fmt.Errorf("agent session already active")
 	}
+
+	// Initialise metrics for this session and chain the counter into OnEvent.
+	m := core.NewSessionMetrics()
+	s.metrics = m
+	params.OnEvent = chainOnEvent(params.OnEvent, metricsObserver(m))
 
 	builder := s.build
 	if builder == nil {
@@ -62,6 +69,49 @@ func (s *Session) Start(params BuildParams, messages []core.Message) error {
 	go s.execute(run, ctx)
 
 	return nil
+}
+
+// Metrics returns the session's live usage metrics, or nil when no session
+// has been started yet.
+func (s *Session) Metrics() *core.SessionMetrics {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.metrics
+}
+
+// chainOnEvent returns an OnEvent function that calls both a and b.
+// Either may be nil.
+func chainOnEvent(a, b func(core.Event)) func(core.Event) {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return func(ev core.Event) {
+		a(ev)
+		b(ev)
+	}
+}
+
+// metricsObserver returns an OnEvent callback that increments m on relevant events.
+//   - core.TurnEnded       → one full San turn (model round trip) completed
+//   - sdkagent.ToolStart   → one tool call dispatched
+//   - sdkagent.MessageEnd  → one inference response with token counts
+func metricsObserver(m *core.SessionMetrics) func(core.Event) {
+	return func(ev core.Event) {
+		switch e := ev.(type) {
+		case core.TurnEnded:
+			m.RecordModelCall()
+		case sdkagent.ToolStart:
+			m.RecordToolCall()
+		case sdkagent.MessageEnd:
+			if e.Response != nil {
+				usage := e.Response.Usage
+				m.RecordTokens(usage.Input, usage.CacheRead, usage.Output)
+			}
+		}
+	}
 }
 
 // execute owns the run generation: the session stays active until Run returns,

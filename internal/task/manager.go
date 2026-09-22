@@ -68,6 +68,14 @@ func (m *Manager) SetOutputDir(dir string) error {
 	return nil
 }
 
+// OutputDir returns the current output directory, or "" when not configured.
+// Safe to call from any goroutine.
+func (m *Manager) OutputDir() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.outputDir
+}
+
 // outputPath is where a task's log lives, or "" when output is not persisted.
 // The task creates the file itself, outside the registry lock.
 func (m *Manager) outputPath(taskID string) string {

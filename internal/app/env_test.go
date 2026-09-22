@@ -132,3 +132,29 @@ func TestCompressions_StartsAtZero(t *testing.T) {
 		t.Errorf("Compressions = %d, want 0 at session start", e.Compressions)
 	}
 }
+
+// TestSessionPlanModeCheckerReflectsReadOnlyMode verifies that
+// sessionPlanModeChecker.IsPlanMode() returns true only when the session
+// permissions are in ModeReadOnly (San's "Plan Mode" equivalent — safe
+// tools only, no mutations).
+func TestSessionPlanModeCheckerReflectsReadOnlyMode(t *testing.T) {
+	tests := []struct {
+		mode setting.OperationMode
+		want bool
+	}{
+		{setting.ModeNormal, false},
+		{setting.ModeAutoAccept, false},
+		{setting.ModeAutoPilot, false},
+		{setting.ModeBypassPermissions, false},
+		{setting.ModeDontAsk, false},
+		{setting.ModeReadOnly, true},
+	}
+	for _, tt := range tests {
+		perms := setting.NewSessionPermissions()
+		perms.SetMode(tt.mode)
+		checker := sessionPlanModeChecker{perms: perms}
+		if got := checker.IsPlanMode(); got != tt.want {
+			t.Errorf("IsPlanMode() with mode %v = %v, want %v", tt.mode, got, tt.want)
+		}
+	}
+}

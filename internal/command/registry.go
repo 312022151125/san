@@ -53,6 +53,7 @@ func builtinCommands() []Info {
 		{Name: "goal", Description: "State a goal and let autopilot drive until it's met (/goal <text>, /goal clear)"},
 		{Name: "name", Description: "Set or change the name of the current conversation session"},
 		{Name: "quit", Description: "Exit the application (/exit also works)"},
+		{Name: "debug", Description: "Debugging and diagnostics (/debug metrics — session token and round-trip statistics)", Hidden: true},
 	}
 }
 

@@ -31,7 +31,7 @@ func TestAdvisorToolGating(t *testing.T) {
 	}
 
 	schemaNames := func(extra []core.ToolSchema) []string {
-		set := newAgentToolSet(cfg.AllowTools.Names(), cfg.DenyTools.BareNames(), nil, nil, extra)
+		set := newAgentToolSet(cfg.AllowTools.Names(), cfg.DenyTools.BareNames(), nil, nil, extra, false)
 		got := filterSchemasForPermission(set.Tools(), cfg.PermissionMode, cfg.AllowTools)
 		names := make([]string, 0, len(got))
 		for _, s := range got {

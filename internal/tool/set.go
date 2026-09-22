@@ -21,6 +21,15 @@ import (
 // retain writes durable memory on behalf of the whole task; it lives on the
 // orchestration layer so parallel subagents cannot store duplicate
 // observations of the same work (memory writes are a parent concern).
+//
+// NOTE: ToolBatch is intentionally NOT in this list (D5 design decision).
+// Batch is available to write-capable agents (worker, any PermissionAcceptEdits
+// or PermissionBypass agent) because Tura-style round-trip savings apply at
+// every level of the tree: Main → Task batch → worker → Batch tool.
+// Batch access is permission-gated: agents without Bash access (explore,
+// advisor, reviewer) do not have Batch in their AllowTools list.
+// Plan Mode is enforced at execution time via BatchTool.PlanModeChecker,
+// not at schema-filter time.
 var parentOnlyTools = map[string]bool{
 	ToolAgent:      true,
 	ToolAgentStop:  true,
@@ -50,7 +59,12 @@ type Set struct {
 	Disallow       []string                 // agent deny list (excluded after allow filtering)
 	IsAgent        bool                     // true for subagent tool sets (excludes parent-only tools)
 	ExtraTools     []core.ToolSchema        // caller-built conditional tools (e.g. Evolve; main agent only)
-	disallowSet    map[string]bool          // eagerly-initialized normalized lookup cache for Disallow
+	// BatchEnabled mirrors SchemaOptions.BatchEnabled: when true the Agent
+	// tool schema includes the batch parameters (tasks[], context). The main
+	// agent always sets this true; subagent tool sets inherit the value
+	// through newAgentToolSet.
+	BatchEnabled bool
+	disallowSet  map[string]bool // eagerly-initialized normalized lookup cache for Disallow
 }
 
 // Tools returns the resolved tool set for a turn.
@@ -80,6 +94,7 @@ func (s *Set) defaultTools() []core.ToolSchema {
 		MCPTools:       s.MCP,
 		AgentDirectory: s.AgentDirectory,
 		ExtraTools:     s.ExtraTools,
+		BatchEnabled:   s.BatchEnabled,
 	})
 
 	filtered := make([]core.ToolSchema, 0, len(tools))
@@ -98,6 +113,7 @@ func (s *Set) agentAllTools() []core.ToolSchema {
 	allTools := GetToolSchemasWith(SchemaOptions{
 		MCPTools:       s.MCP,
 		AgentDirectory: s.AgentDirectory,
+		BatchEnabled:   s.BatchEnabled,
 	})
 	filtered := make([]core.ToolSchema, 0, len(allTools))
 	for _, t := range allTools {

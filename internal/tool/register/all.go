@@ -5,6 +5,7 @@ package register
 import (
 	_ "github.com/genai-io/san/internal/tool/agent"
 	_ "github.com/genai-io/san/internal/tool/ask"
+	_ "github.com/genai-io/san/internal/tool/batch"
 	_ "github.com/genai-io/san/internal/tool/cron"
 	_ "github.com/genai-io/san/internal/tool/evolve"
 	_ "github.com/genai-io/san/internal/tool/fs"

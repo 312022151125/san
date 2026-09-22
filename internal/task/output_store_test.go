@@ -53,6 +53,20 @@ func TestAgentTaskAppendOutputWritesToOutputFile(t *testing.T) {
 	}
 }
 
+func TestManagerOutputDir(t *testing.T) {
+	m := NewManager()
+	if dir := m.OutputDir(); dir != "" {
+		t.Errorf("OutputDir() = %q, want empty string before SetOutputDir", dir)
+	}
+	tmpDir := t.TempDir()
+	if err := m.SetOutputDir(tmpDir); err != nil {
+		t.Fatalf("SetOutputDir: %v", err)
+	}
+	if dir := m.OutputDir(); dir != tmpDir {
+		t.Errorf("OutputDir() = %q, want %q", dir, tmpDir)
+	}
+}
+
 func TestManagersKeepOutputDirectoriesIndependent(t *testing.T) {
 	firstDir := t.TempDir()
 	secondDir := t.TempDir()

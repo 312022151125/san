@@ -71,6 +71,34 @@ Use `advisor` on-demand for architectural trade-offs, debugging dead ends,
 and non-trivial correctness or concurrency questions. See
 [`docs/guides/advisor-agent.md`](docs/guides/advisor-agent.md).
 
+## Token-Efficient Orchestration
+
+San has two batching layers for reducing model round trips.
+
+**Agent batch** — use `Agent` with `tasks[]` for parallel independent semantic work:
+```json
+{ "context": "Shared goal and constraints...",
+  "tasks": [
+    { "agent": "explore", "name": "A", "task": "..." },
+    { "agent": "explore", "name": "B", "task": "..." }
+  ] }
+```
+One model turn fans out N agents concurrently. Shared context is sent once.
+Only `explore`-mode agents are allowed during Plan Mode.
+
+**Batch tool** — use `Batch` for deterministic command graphs:
+```json
+{ "commands": [
+    { "id": "build", "command": "go build ./..." },
+    { "id": "test",  "command": "go test ./...", "depends_on": ["build"] }
+  ] }
+```
+One tool call runs the full DAG; failed deps skip their dependents automatically.
+Available to write-capable agents (`worker`). Rejected entirely in Plan Mode.
+
+See [`docs/concepts/token-efficiency.md`](docs/concepts/token-efficiency.md)
+for the full design, including output compaction, session metrics, and permission rules.
+
 ## Documentation Rules
 
 - Add or update docs in the same change as architecture or workflow changes.

@@ -86,6 +86,8 @@ type SlashCommandEnv struct {
 	StopAgentSession        func()
 	ResetAgentSession       func()
 	FireSessionEnd          func(reason string)
+	// GetMetrics returns the active session's usage metrics snapshot, or nil.
+	GetMetrics          func() *core.SessionMetricsSnapshot
 	BuildCompactRequest     func(focus, trigger string) conv.CompactRequest
 	SpinnerTickCmd          func() tea.Cmd
 	ResetCronQueue          func()
@@ -132,6 +134,27 @@ func builtinCommandHandlers() map[string]slashCommandHandler {
 		"name":           (*SlashCommandController).handleNameCommand,
 		"evolve":         (*SlashCommandController).handleEvolveCommand,
 		"selflearn-demo": (*SlashCommandController).handleSelflearnDemoCommand,
+		"debug":          (*SlashCommandController).handleDebugCommand,
+	}
+}
+
+// handleDebugCommand exposes debugging and diagnostics subcommands.
+// Currently: /debug metrics — prints session token/round-trip statistics.
+// Output is printed to the conversation but never sent to the model.
+func (c *SlashCommandController) handleDebugCommand(_ context.Context, args string) (string, tea.Cmd, error) {
+	sub := strings.TrimSpace(strings.ToLower(args))
+	switch sub {
+	case "metrics", "":
+		if c.env.GetMetrics == nil {
+			return "Metrics are not available in this configuration.", nil, nil
+		}
+		snap := c.env.GetMetrics()
+		if snap == nil {
+			return "No active session — start a conversation first.", nil, nil
+		}
+		return snap.String(), nil, nil
+	default:
+		return fmt.Sprintf("Unknown debug subcommand %q. Available: metrics", sub), nil, nil
 	}
 }
 
