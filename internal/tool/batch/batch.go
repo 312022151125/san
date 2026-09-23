@@ -111,11 +111,12 @@ type BatchResult struct {
 type BatchTool struct {
 	planModeChecker tool.PlanModeChecker
 	outputDir       string
+	engine          Engine // execution engine; always non-nil after NewBatchTool
 }
 
-// NewBatchTool creates a new BatchTool.
+// NewBatchTool creates a new BatchTool backed by the canonical Engine.
 func NewBatchTool() *BatchTool {
-	return &BatchTool{}
+	return &BatchTool{engine: NewEngine()}
 }
 
 func (t *BatchTool) Name() string        { return tool.ToolBatch }
@@ -186,7 +187,11 @@ func (t *BatchTool) execute(ctx context.Context, params map[string]any, cwd stri
 	ctx, cancel := context.WithTimeout(ctx, batchTotalTimeout)
 	defer cancel()
 
-	result, err := executeBatch(ctx, cmds, cwd, t.outputDir)
+	result, err := t.engine.Execute(ctx, EngineRequest{
+		Commands:  cmds,
+		CWD:       cwd,
+		OutputDir: t.outputDir,
+	})
 	if err != nil {
 		return toolresult.NewErrorResult(t.Name(), fmt.Sprintf("batch execution error: %v", err))
 	}

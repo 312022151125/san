@@ -14,6 +14,7 @@ const (
 
 	ToolBash        = "Bash"
 	ToolBatch       = "Batch"
+	ToolFinalize    = "Finalize"
 	ToolAgent       = "Agent"
 	ToolAgentStop   = "AgentStop"
 	ToolSendMessage = "SendMessage"
@@ -74,7 +75,7 @@ type SchemaOptions struct {
 // than skipped at runtime. TestBuiltinOrderCoversEveryRegisteredTool guards
 // the reverse: a registered tool must not be missing from this order.
 var builtinToolOrder = []string{
-	ToolRead, ToolGrep, ToolGlob, ToolWebFetch, ToolWebSearch, ToolEdit, ToolWrite, ToolBash, ToolBatch, ToolAskUserQuestion,
+	ToolRead, ToolGrep, ToolGlob, ToolWebFetch, ToolWebSearch, ToolEdit, ToolWrite, ToolBash, ToolBatch, ToolFinalize, ToolAskUserQuestion,
 	ToolSkill,
 	ToolAgent, ToolAgentStop, ToolSendMessage,
 	ToolTaskCreate, ToolTaskGet, ToolTaskUpdate,

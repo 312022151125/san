@@ -8,6 +8,7 @@ import (
 	_ "github.com/genai-io/san/internal/tool/batch"
 	_ "github.com/genai-io/san/internal/tool/cron"
 	_ "github.com/genai-io/san/internal/tool/evolve"
+	_ "github.com/genai-io/san/internal/tool/finalize"
 	_ "github.com/genai-io/san/internal/tool/fs"
 	_ "github.com/genai-io/san/internal/tool/memory"
 	_ "github.com/genai-io/san/internal/tool/skill"

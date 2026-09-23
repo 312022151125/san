@@ -35,8 +35,10 @@ Agent, persistence, and orchestration:
 | --- | --- | --- |
 | `internal/agent` | `feature` | Agent construction, permission adapter, and session-facing setup. |
 | `internal/llm` | `feature` | The active connection, the provider registry, the model store, error classification, cost tracking, and the `vendor_*` adapter reaching every vendor through `genai-io/sdk-go`. |
-| `internal/tool` | `feature` | Built-in tool schemas, registry, adapters, permission checks, execution. Subpackages hold the tool adapters, named after the capability they expose (`fs`, `agent`, `batch`, `cron`, `skill`, `todo`, `web`, `ask`, `evolve`, `memory`); `register` blank-imports them all to trigger registration; `perm` and `toolresult` are shared types. |
+| `internal/tool` | `feature` | Built-in tool schemas, registry, adapters, permission checks, execution. Subpackages hold the tool adapters, named after the capability they expose (`fs`, `agent`, `batch`, `finalize`, `cron`, `skill`, `todo`, `web`, `ask`, `evolve`, `memory`); `register` blank-imports them all to trigger registration; `perm` and `toolresult` are shared types. |
 | `internal/tool/batch` | `feature` | Batch tool: deterministic multi-command DAG executor. Accepts `commands[]` with `depends_on` edges, runs independent commands concurrently, propagates fail-fast skips, and returns one compact result. Available to write-capable agents (worker). Plan Mode rejects it entirely. |
+| `internal/finalize` | `feature` | Smart Parallel Finalization pipeline: changed-file scope detection, tier classification (FAST/STANDARD/FULL), verification DAG construction, parallel batch execution, speculative reviewer, and compact result aggregation. |
+| `internal/tool/finalize` | `feature` | Finalize tool: model-facing surface over the finalization pipeline. Rejects in Plan Mode. Commands constructed by trusted pipeline logic only. |
 | `internal/session` | `feature` | Session metadata, transcript persistence, resume, projection, message conversion. |
 | `internal/session/transcript` | `feature` | Transcript records, filesystem store, projection, renderable views. |
 | `internal/task` | `feature` | Background task management, bash and agent task execution, output storage. |

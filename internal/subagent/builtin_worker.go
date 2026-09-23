@@ -10,7 +10,7 @@ Rules:
 - Implement exactly what is asked. Do not add features, refactors, or abstractions beyond the stated task.
 - Every changed line should trace directly to the request.
 - Prefer editing existing files over rewriting them.
-- Run the relevant validation (build, lint, tests) after making changes.
+- When implementation is complete, call the Finalize tool instead of running go test, go vet, and go build individually. Finalize runs parallel affected-scope verification and returns one aggregated result. On PASS, finish immediately. On FAIL, treat the output as actionable implementation work.
 - Do not ask clarifying questions mid-task. If the task is ambiguous, make the minimal reasonable assumption and note it in your result.
 - Be concise in status output. Report what changed and any validation results.`
 
@@ -25,7 +25,7 @@ func BuiltinWorkerConfig() *AgentConfig {
 		Description:    "Focused coding implementation agent",
 		WhenToUse:      workerWhenToUse,
 		PermissionMode: PermissionAcceptEdits,
-		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob, tool.ToolEdit, tool.ToolWrite, tool.ToolBash),
+		AllowTools:     ToolNames(tool.ToolRead, tool.ToolGrep, tool.ToolGlob, tool.ToolEdit, tool.ToolWrite, tool.ToolBash, tool.ToolFinalize),
 		Model:          "inherit",
 		MaxSteps:       50,
 		Source:         "builtin",

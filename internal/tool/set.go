@@ -22,14 +22,14 @@ import (
 // orchestration layer so parallel subagents cannot store duplicate
 // observations of the same work (memory writes are a parent concern).
 //
-// NOTE: ToolBatch is intentionally NOT in this list (D5 design decision).
+// NOTE: ToolBatch and ToolFinalize are intentionally NOT in this list.
 // Batch is available to write-capable agents (worker, any PermissionAcceptEdits
 // or PermissionBypass agent) because Tura-style round-trip savings apply at
 // every level of the tree: Main → Task batch → worker → Batch tool.
-// Batch access is permission-gated: agents without Bash access (explore,
-// advisor, reviewer) do not have Batch in their AllowTools list.
-// Plan Mode is enforced at execution time via BatchTool.PlanModeChecker,
-// not at schema-filter time.
+// Finalize is available to the same agents: it runs trusted verification
+// commands via the Batch engine and is plan-mode gated at execution time.
+// Both tools' access is permission-gated via AllowTools on each agent config.
+// Plan Mode is enforced at execution time, not at schema-filter time.
 var parentOnlyTools = map[string]bool{
 	ToolAgent:      true,
 	ToolAgentStop:  true,
